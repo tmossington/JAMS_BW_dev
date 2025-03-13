@@ -156,8 +156,21 @@ cat(paste("JAMS R libraries will be installed to", rlibs, "\n"))
 #Install devtools and stringr if not present
 repos <- "https://cloud.r-project.org"
 
-if(!(all((c("devtools", "stringr", "parallel", "benchmarkme", "BiocManager", "prettyunits") %in% rownames(installed.packages()))))){
-    install.packages(c("devtools", "stringr", "parallel", "benchmarkme", "BiocManager", "prettyunits"), repos = repos, update = TRUE, lib = rlibs)
+##### TEMPORARY FIX FOR BENCHMARKME #####
+
+# Remove the global benchmarkme package if it is already installed
+if ("benchmarkme" %in% rownames(installed.packages())) {
+    remove.packages("benchmarkme", lib = rlibs)
+}
+
+# Install your local version of benchmarkme
+devtools::install_github("https://github.com/tmossington/benchmarkme.git", lib = rlibs)
+
+# ensure local version is loaded
+require("benchmarkme")
+
+if(!(all((c("devtools", "stringr", "parallel", "BiocManager", "prettyunits") %in% rownames(installed.packages()))))){
+    install.packages(c("devtools", "stringr", "parallel", "BiocManager", "prettyunits"), repos = repos, update = TRUE, lib = rlibs)
 }
 #Make sure we have the correct version of Bioconductor
 BiocManager::install(version = "3.19", ask = FALSE)
@@ -165,7 +178,6 @@ BiocManager::install(version = "3.19", ask = FALSE)
 require("devtools")
 require("stringr")
 require("parallel")
-require("benchmarkme")
 require("BiocManager")
 
 threads <- detectBatchCPUs()
