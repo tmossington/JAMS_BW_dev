@@ -164,7 +164,7 @@ if ("benchmarkme" %in% rownames(installed.packages())) {
 }
 
 # Install your local version of benchmarkme
-devtools::install_github("https://github.com/tmossington/benchmarkme.git", lib = rlibs)
+devtools::install_github("tmossington/benchmarkme@fix-win-ram-reporting", lib = rlibs)
 
 # ensure local version is loaded
 require("benchmarkme")
