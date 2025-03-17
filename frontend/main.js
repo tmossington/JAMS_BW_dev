@@ -48,17 +48,24 @@ app.on('activate', () => {
 });
 
 function checkJAMSInstallation() {
-  const homeDir = process.env.HOME || process.env.HOMEPATH || process.env.USERPROFILE;
-  const binDir = path.join(homeDir, 'bin');
-  const executables = ['JAMSalpha', 'JAMSbeta', 'JAMS16', 'JAMSbuildk2db', 'JAMSjoinlanes', 'JAMSmakeswarm', 'JAMSbankit', 'JAMSfastqprefixrenamer'];
-
   let allExecutablesExist = true;
 
-  for (const exec of executables) {
-    const execPath = path.join(binDir, exec);
-    if (!fs.existsSync(execPath)) {
+  if (process.platform === 'win32') {
+    const jamsPath = path.join('C:', 'Program Files', 'R', 'R-4.4.3', 'library', 'JAMS');
+    if (!fs.existsSync(jamsPath)) {
       allExecutablesExist = false;
-      break;
+    }
+  } else {
+    const homeDir = process.env.HOME || process.env.HOMEPATH || process.env.USERPROFILE;
+    const binDir = path.join(homeDir, 'bin');
+    const executables = ['JAMSalpha', 'JAMSbeta', 'JAMS16', 'JAMSbuildk2db', 'JAMSjoinlanes', 'JAMSmakeswarm', 'JAMSbankit', 'JAMSfastqprefixrenamer'];
+
+    for (const exec of executables) {
+      const execPath = path.join(binDir, exec);
+      if (!fs.existsSync(execPath)) {
+        allExecutablesExist = false;
+        break;
+      }
     }
   }
 
