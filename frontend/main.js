@@ -742,9 +742,8 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
     console.error(`Error creating directory: ${err}`);
   }
 
-  // Escape spaces in file path for R
   const escapedOutputPath = process.platform === 'win32'
-  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  ? `"${outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ')}"`
   : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
@@ -800,31 +799,17 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
   } else {
     // macOS/Linux script
     script = `
-    ${rscriptPath} -e '
-    suppressPackageStartupMessages({
-    suppressWarnings({
-      options(encoding = "UTF-8");
-      tryCatch({
-        ${loadCommand}
+      ${rscriptPath} -e '
+        suppressPackageStartupMessages({
+        suppressWarnings({
+        ${loadCommand};
         library(JAMS); 
-        cat("JAMS library loaded\\n")
         source("${scriptPath}");
-        cat("Source function loaded\\n")
-        pdf("${escapedOutputPath}");
-        cat("PDF device opened\\n")
-        tryCatch({
-          cat("Attempting to run plot_alpha_diversity...\\n")
-          plot_alpha_diversity(${paramStr})
-          cat("plot_alpha_diversity completed successfully!\\n")
-        }, error = function(e) {
-          cat("ERROR IN R CODE: ", e$message, "\\n")
-        })
+        pdf("${escapedOutputPath}", paper = "a4r");
+        print(plot_alpha_diversity(${paramStr}))
         dev.off();
-      }, error = function(e) {
-        cat("ERROR LOADING FILE: ", e$message, "\\n")
-      })
-    })
-    })'
+        })
+      })'
     `;
   }
 
