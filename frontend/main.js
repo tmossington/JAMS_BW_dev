@@ -207,7 +207,7 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
           return `${key}=${value}`;
         } else if (typeof value === 'boolean') {
           return `${key}=${value ? 'TRUE' : 'FALSE'}`;
-        } else if (typeof value ==='number' || !isNaN(value)) {
+        } else if (typeof value === 'number' || !isNaN(value)) {
           return `${key}=${Number(value)}`
         } else if (typeof value === 'string') {
           return `${key}="${value}"`;
@@ -215,7 +215,6 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
           return `${key}=${value}`;
         }
       })
-
       .join(', ');
 
   console.log(paramStr);
@@ -229,7 +228,7 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
     ? `obj <- readRDS("${filePath.replace(/\\/g, '\\\\')}")` 
     : `load("${filePath.replace(/\\/g, '\\\\')}")`;
 
-// Run plot_relabund_heatmap command with user-defined parameters
+  // Run plot_relabund_heatmap command with user-defined parameters
   const outputDir = path.join(app.getPath('userData'), 'assets');
   const outputFilePath = path.join(outputDir, 'heatmap.pdf');
   const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript';
@@ -253,7 +252,7 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
-  const testScript = `${rscriptPath} -e "pdf('${testPdfPath}'); plot(1:10); dev.off(); cat('Test PDF created')"`;
+  const testScript = `${rscriptPath} -e "pdf('${testPdfPath}'); plot(1:10); dev.off(); cat('Test PDF created')"`; 
 
   console.log('Testing basic PDF creation...');
   exec(testScript, {shell: true}, (testError, testStdout, testStderr) => {
@@ -272,23 +271,27 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
     // Create R script content
     const rScriptContent = `
       options(encoding = 'UTF-8')
-      load("${filePath.replace(/\\/g, '\\\\')}")
-      library(JAMS)
-      cat('JAMS library loaded\\n')
-      source("${scriptPath}")
-      cat('Source function loaded\\n')
-      pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
-      cat('PDF device opened\\n')
       tryCatch({
-        cat('Attempting to run plot_relabund_heatmap...\\n')
-        result <- plot_relabund_heatmap(${paramStr})
-        print(result)
-        cat('plot_relabund_heatmap completed successfully!\\n')
+        ${loadCommand}
+        library(JAMS)
+        cat('JAMS library loaded\\n')
+        source("${scriptPath}")
+        cat('Source function loaded\\n')
+        pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
+        cat('PDF device opened\\n')
+        tryCatch({
+          cat('Attempting to run plot_relabund_heatmap...\\n')
+          result <- plot_relabund_heatmap(${paramStr})
+          print(result)
+          cat('plot_relabund_heatmap completed successfully!\\n')
+        }, error = function(e) {
+          cat('ERROR IN R CODE: ', e$message, '\\n')
+        })
+        dev.off()
+        cat('PDF device closed\\n')
       }, error = function(e) {
-        cat('ERROR IN R CODE: ', e$message, '\\n')
+        cat('ERROR LOADING FILE: ', e$message, '\\n')
       })
-      dev.off()
-      cat('PDF device closed\\n')
     `;
     
     // Write the script to a file
@@ -304,21 +307,25 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
     suppressPackageStartupMessages({
     suppressWarnings({
       options(encoding = "UTF-8");
-      ${loadCommand}
-      library(JAMS); 
-      cat("JAMS library loaded\\n")
-      source("${scriptPath}");
-      cat("Source function loaded\\n")
-      pdf("${escapedOutputPath}");
-      cat("PDF device opened\\n")
       tryCatch({
-        cat("Attempting to run plot_relabund_heatmap...\\n")
-        plot_relabund_heatmap(${paramStr})
-        cat("plot_relabund_heatmap completed successfully!\\n")
+        ${loadCommand}
+        library(JAMS); 
+        cat("JAMS library loaded\\n")
+        source("${scriptPath}");
+        cat("Source function loaded\\n")
+        pdf("${escapedOutputPath}");
+        cat("PDF device opened\\n")
+        tryCatch({
+          cat("Attempting to run plot_relabund_heatmap...\\n")
+          plot_relabund_heatmap(${paramStr})
+          cat("plot_relabund_heatmap completed successfully!\\n")
+        }, error = function(e) {
+          cat("ERROR IN R CODE: ", e$message, "\\n")
+        })
+        dev.off();
       }, error = function(e) {
-        cat("ERROR IN R CODE: ", e$message, "\\n")
+        cat("ERROR LOADING FILE: ", e$message, "\\n")
       })
-      dev.off();
     })
     })'
     `;
@@ -505,23 +512,27 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
     // Create R script content
     const rScriptContent = `
       options(encoding = 'UTF-8')
-      load("${filePath.replace(/\\/g, '\\\\')}")
-      library(JAMS)
-      cat('JAMS library loaded\\n')
-      source("${scriptPath}")
-      cat('Source function loaded\\n')
-      pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
-      cat('PDF device opened\\n')
       tryCatch({
-        cat('Attempting to run plot_Ordination...\\n')
-        result <- plot_Ordination(${paramStr})
-        print(result)
-        cat('plot_Ordination completed successfully!\\n')
+        ${loadCommand}
+        library(JAMS)
+        cat('JAMS library loaded\\n')
+        source("${scriptPath}")
+        cat('Source function loaded\\n')
+        pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
+        cat('PDF device opened\\n')
+        tryCatch({
+          cat('Attempting to run plot_Ordination...\\n')
+          result <- plot_Ordination(${paramStr})
+          print(result)
+          cat('plot_Ordination completed successfully!\\n')
+        }, error = function(e) {
+          cat('ERROR IN R CODE: ', e$message, '\\n')
+        })
+        dev.off()
+        cat('PDF device closed\\n')
       }, error = function(e) {
-        cat('ERROR IN R CODE: ', e$message, '\\n')
+        cat('ERROR LOADING FILE: ', e$message, '\\n')
       })
-      dev.off()
-      cat('PDF device closed\\n')
     `;
     
     // Write the script to a file
@@ -537,21 +548,25 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
     suppressPackageStartupMessages({
     suppressWarnings({
       options(encoding = "UTF-8");
-      ${loadCommand}
-      library(JAMS); 
-      cat("JAMS library loaded\\n")
-      source("${scriptPath}");
-      cat("Source function loaded\\n")
-      pdf("${escapedOutputPath}");
-      cat("PDF device opened\\n")
       tryCatch({
-        cat("Attempting to run plot_Ordination...\\n")
-        plot_Ordination(${paramStr})
-        cat("plot_Ordination completed successfully!\\n")
+        ${loadCommand}
+        library(JAMS); 
+        cat("JAMS library loaded\\n")
+        source("${scriptPath}");
+        cat("Source function loaded\\n")
+        pdf("${escapedOutputPath}");
+        cat("PDF device opened\\n")
+        tryCatch({
+          cat("Attempting to run plot_Ordination...\\n")
+          plot_Ordination(${paramStr})
+          cat("plot_Ordination completed successfully!\\n")
+        }, error = function(e) {
+          cat("ERROR IN R CODE: ", e$message, "\\n")
+        })
+        dev.off();
       }, error = function(e) {
-        cat("ERROR IN R CODE: ", e$message, "\\n")
+        cat("ERROR LOADING FILE: ", e$message, "\\n")
       })
-      dev.off();
     })
     })'
     `;
@@ -660,12 +675,11 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
 
   const { filePath, ExpObj, ...otherParams } = params;
 
-    // Split ExpObj to capture the file name dynamically
-    const [fileName, objNameRaw] = ExpObj.split('$');
-    const objName = objNameRaw ? objNameRaw.trim() : '';
-    const cleanedExpObj = `${fileName}$${objName}`;
-    console.log(`File Name: ${fileName}, Object Name: ${objName}, Cleaned ExpObj: ${cleanedExpObj}`);
-  
+  // Split ExpObj to capture the file name dynamically
+  const [fileName, objNameRaw] = ExpObj.split('$');
+  const objName = objNameRaw ? objNameRaw.trim() : '';
+  const cleanedExpObj = `${fileName}$${objName}`;
+  console.log(`File Name: ${fileName}, Object Name: ${objName}, Cleaned ExpObj: ${cleanedExpObj}`);
 
   // Construct paramStr dynamically to account for anything the user inputs
   const paramStr = `ExpObj = ${cleanedExpObj}, ` +
@@ -677,7 +691,7 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
           return `${key}=${value}`;
         } else if (typeof value === 'boolean') {
           return `${key}=${value ? 'TRUE' : 'FALSE'}`;
-        } else if (typeof value ==='number' || !isNaN(value)) {
+        } else if (typeof value === 'number' || !isNaN(value)) {
           return `${key}=${Number(value)}`
         } else if (typeof value === 'string') {
           return `${key}="${value}"`;
@@ -685,7 +699,6 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
           return `${key}=${value}`;
         }
       })
-
       .join(', ');
 
   console.log(paramStr);
@@ -699,7 +712,7 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
     ? `obj <- readRDS("${filePath.replace(/\\/g, '\\\\')}")` 
     : `load("${filePath.replace(/\\/g, '\\\\')}")`;
 
-// Run plot_alpha_diversity command with user-defined parameters
+  // Run plot_alpha_diversity command with user-defined parameters
   const outputDir = path.join(app.getPath('userData'), 'assets');
   const outputFilePath = path.join(outputDir, 'alphaDiversity.pdf');
   const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript';
@@ -742,23 +755,27 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
     // Create R script content
     const rScriptContent = `
       options(encoding = 'UTF-8')
-      load("${filePath.replace(/\\/g, '\\\\')}")
-      library(JAMS)
-      cat('JAMS library loaded\\n')
-      source("${scriptPath}")
-      cat('Source function loaded\\n')
-      pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
-      cat('PDF device opened\\n')
       tryCatch({
-        cat('Attempting to run plot_alpha_diversity...\\n')
-        result <- plot_alpha_diversity(${paramStr})
-        print(result)
-        cat('plot_alpha_diversity completed successfully!\\n')
+        ${loadCommand}
+        library(JAMS)
+        cat('JAMS library loaded\\n')
+        source("${scriptPath}")
+        cat('Source function loaded\\n')
+        pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
+        cat('PDF device opened\\n')
+        tryCatch({
+          cat('Attempting to run plot_alpha_diversity...\\n')
+          result <- plot_alpha_diversity(${paramStr})
+          print(result)
+          cat('plot_alpha_diversity completed successfully!\\n')
+        }, error = function(e) {
+          cat('ERROR IN R CODE: ', e$message, '\\n')
+        })
+        dev.off()
+        cat('PDF device closed\\n')
       }, error = function(e) {
-        cat('ERROR IN R CODE: ', e$message, '\\n')
+        cat('ERROR LOADING FILE: ', e$message, '\\n')
       })
-      dev.off()
-      cat('PDF device closed\\n')
     `;
     
     // Write the script to a file
@@ -774,21 +791,25 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
     suppressPackageStartupMessages({
     suppressWarnings({
       options(encoding = "UTF-8");
-      ${loadCommand}
-      library(JAMS); 
-      cat("JAMS library loaded\\n")
-      source("${scriptPath}");
-      cat("Source function loaded\\n")
-      pdf("${escapedOutputPath}");
-      cat("PDF device opened\\n")
       tryCatch({
-        cat("Attempting to run plot_alpha_diversity...\\n")
-        plot_alpha_diversity(${paramStr})
-        cat("plot_alpha_diversity completed successfully!\\n")
+        ${loadCommand}
+        library(JAMS); 
+        cat("JAMS library loaded\\n")
+        source("${scriptPath}");
+        cat("Source function loaded\\n")
+        pdf("${escapedOutputPath}");
+        cat("PDF device opened\\n")
+        tryCatch({
+          cat("Attempting to run plot_alpha_diversity...\\n")
+          plot_alpha_diversity(${paramStr})
+          cat("plot_alpha_diversity completed successfully!\\n")
+        }, error = function(e) {
+          cat("ERROR IN R CODE: ", e$message, "\\n")
+        })
+        dev.off();
       }, error = function(e) {
-        cat("ERROR IN R CODE: ", e$message, "\\n")
+        cat("ERROR LOADING FILE: ", e$message, "\\n")
       })
-      dev.off();
     })
     })'
     `;
@@ -974,23 +995,27 @@ ipcMain.handle('run-relabundFeatures-script', async (event, params) => {
     // Create R script content
     const rScriptContent = `
       options(encoding = 'UTF-8')
-      load("${filePath.replace(/\\/g, '\\\\')}")
-      library(JAMS)
-      cat('JAMS library loaded\\n')
-      source("${scriptPath}")
-      cat('Source function loaded\\n')
-      pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
-      cat('PDF device opened\\n')
       tryCatch({
-        cat('Attempting to run plot_relabund_features...\\n')
-        result <- plot_relabund_features(${paramStr})
-        print(result)
-        cat('plot_relabund_features completed successfully!\\n')
+        ${loadCommand}
+        library(JAMS)
+        cat('JAMS library loaded\\n')
+        source("${scriptPath}")
+        cat('Source function loaded\\n')
+        pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
+        cat('PDF device opened\\n')
+        tryCatch({
+          cat('Attempting to run plot_relabund_features...\\n')
+          result <- plot_relabund_features(${paramStr})
+          print(result)
+          cat('plot_relabund_features completed successfully!\\n')
+        }, error = function(e) {
+          cat('ERROR IN R CODE: ', e$message, '\\n')
+        })
+        dev.off()
+        cat('PDF device closed\\n')
       }, error = function(e) {
-        cat('ERROR IN R CODE: ', e$message, '\\n')
+        cat('ERROR LOADING FILE: ', e$message, '\\n')
       })
-      dev.off()
-      cat('PDF device closed\\n')
     `;
     
     // Write the script to a file
@@ -1006,21 +1031,25 @@ ipcMain.handle('run-relabundFeatures-script', async (event, params) => {
     suppressPackageStartupMessages({
     suppressWarnings({
       options(encoding = "UTF-8");
-      ${loadCommand}
-      library(JAMS); 
-      cat("JAMS library loaded\\n")
-      source("${scriptPath}");
-      cat("Source function loaded\\n")
-      pdf("${escapedOutputPath}");
-      cat("PDF device opened\\n")
       tryCatch({
-        cat("Attempting to run plot_relabund_features...\\n")
-        plot_relabund_features(${paramStr})
-        cat("plot_relabund_features completed successfully!\\n")
+        ${loadCommand}
+        library(JAMS); 
+        cat("JAMS library loaded\\n")
+        source("${scriptPath}");
+        cat("Source function loaded\\n")
+        pdf("${escapedOutputPath}");
+        cat("PDF device opened\\n")
+        tryCatch({
+          cat("Attempting to run plot_relabund_features...\\n")
+          plot_relabund_features(${paramStr})
+          cat("plot_relabund_features completed successfully!\\n")
+        }, error = function(e) {
+          cat("ERROR IN R CODE: ", e$message, "\\n")
+        })
+        dev.off();
       }, error = function(e) {
-        cat("ERROR IN R CODE: ", e$message, "\\n")
+        cat("ERROR LOADING FILE: ", e$message, "\\n")
       })
-      dev.off();
     })
     })'
     `;
