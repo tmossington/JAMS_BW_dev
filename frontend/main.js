@@ -255,7 +255,9 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
@@ -496,7 +498,9 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
@@ -739,7 +743,9 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
@@ -979,7 +985,9 @@ ipcMain.handle('run-relabundFeatures-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
