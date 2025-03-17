@@ -1,6 +1,6 @@
 {
   "name": "JAMS",
-  "version": "1.0.0",
+  "version": "0.1.3",
   "description": "Just a Microbiology System (JAMS) - a suite for analyzing microbiological sequencing data for use on NIH HPC systems (Biowulf)",
   "main": "main.js",
   "scripts": {
