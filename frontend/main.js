@@ -84,14 +84,28 @@ function checkJAMSInstallation() {
 
 function installJAMS() {
   const installerPath = path.join(process.resourcesPath, 'JAMSinstaller_BW');
-  const homeDir = process.env.HOME || process.env.HOMEPATH || process.env.USERPROFILE;
+  const homeDir = process.platform === 'win32' // adjust pathing depending on windows or mac
+    ? process.env.USERPROFILE
+    : process.env.HOME;
   const binDir = path.join(homeDir, 'bin');
 
   // Command to create the bin directory if it doesn't exist
-  const createBinDirCommand = `mkdir -p ${binDir}`;
+  if (!fs.existsSync(binDir)) {
+    fs.mkdirSync(binDir, { recursive: true });
+  }
+
+  const jamsDevPath = path.join(process.resourcesPath, 'JAMS_BW_dev');
+
+  // Escape paths with quotes for Windows compatibility
+  const safeInstallerPath = `"${installerPath}"`;
+  const safeJamsDevPath = `"${jamsDevPath}"`;
 
   // Command to open a new terminal window and run the installer
-  const installCommand = `osascript -e 'tell application "Terminal" to do script "cd ${path.join(process.resourcesPath, 'JAMS_BW_dev')} && ${createBinDirCommand} && ./${path.basename(installerPath)} --install"'`;
+  const installCommand = process.platform === 'win32' // install JAMS command based on platform  
+    ? `start cmd.exe /K cd /D ${safeJamsDevPath} && ${safeInstallerPath} --install`
+    : `osascript -e 'tell application "Terminal" to do script "cd ${jamsDevPath} && chmod +x ${installerPath} && ./${path.basename(installerPath)} --install"'`;
+
+  console.log(`Executing command: ${installCommand}`);
 
   exec(installCommand, (error, stdout, stderr) => {
     if (error) {
@@ -105,6 +119,7 @@ function installJAMS() {
     console.log(`JAMS installed successfully: ${stdout}`);
   });
 }
+
 
 // ** Main Processes ** 
 
@@ -132,33 +147,20 @@ ipcMain.handle('open-file-dialog', async () => {
 });
 
 
-// Load user-provided R data file containing Expvec
 ipcMain.handle('load-rdata-file', async (event, filePath) => {
   return new Promise((resolve, reject) => {
-    const rscriptPath = '/usr/local/bin/Rscript'; // Locate R on user's system
+    const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript'; // Check for Rscript in Windows path or mac bin
 
     // Check if the file is an .rds file
     const isRdsFile = path.extname(filePath).toLowerCase() === '.rds';
 
-    const command = `
-      ${rscriptPath} -e "
-      file_path <- '${filePath}'
-      if (${isRdsFile ? 'TRUE' : 'FALSE'}) {
-        obj <- readRDS(file_path)
-      } else {
-        load(file_path)
-      }
-      list_objs <- ls()
-      list_objs <- list_objs[sapply(list_objs, function(x) is.list(get(x)))]
-      if (length(list_objs) > 0) {
-        first_list <- get(list_objs[1])
-        obj_names <- names(first_list)
-        writeLines(paste(list_objs[1], obj_names, sep='$'), stdout())
-      } else {
-        writeLines('', stdout())
-      }
-      "
-    `;
+    // Escape backslashes in file path for Windows
+    const escapedFilePath = process.platform === 'win32' ? filePath.replace(/\\/g, '\\\\') : filePath; // Replace backslashes with double backslashes for Windows, or use regular path for mac
+
+    // Construct the command
+    const command = `${rscriptPath} -e "${isRdsFile ? `obj <- readRDS('${escapedFilePath}')` : `load('${escapedFilePath}')`}; list_objs <- ls(); list_objs <- list_objs[sapply(list_objs, function(x) is.list(get(x)))]; if (length(list_objs) > 0) { first_list <- get(list_objs[1]); obj_names <- names(first_list); writeLines(paste(list_objs[1], obj_names, sep='$'), stdout()) } else { writeLines('', stdout()) }"`;
+
+    console.log(`Executing command: ${command}`);
 
     exec(command, (error, stdout, stderr) => {
       if (error) {
@@ -181,6 +183,7 @@ ipcMain.handle('load-rdata-file', async (event, filePath) => {
 
 
 
+
 // ** Heatmap Script **
 ipcMain.handle('run-heatmap-script', async (event, params) => {
   // Log the params object for debugging
@@ -189,11 +192,13 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
   const { filePath, ExpObj, advancedSettings, ...otherParams } = params;
 
   // Split ExpObj to capture the file name dynamically
-  const [fileName, objName] = ExpObj.split('$');
-  console.log(`File Name: ${fileName}, Object Name: ${objName}`);
+  const [fileName, objNameRaw] = ExpObj.split('$');
+  const objName = objNameRaw ? objNameRaw.trim() : '';
+  const cleanedExpObj = `${fileName}$${objName}`;
+  console.log(`File Name: ${fileName}, Object Name: ${objName}, Cleaned ExpObj: ${cleanedExpObj}`);
 
   // Construct paramStr dynamically to account for anything the user inputs
-  const paramStr = `ExpObj = ${ExpObj}, ` +
+  const paramStr = `ExpObj = ${cleanedExpObj}, ` +
     Object.entries(otherParams)
       .map(([key, value]) => {
         if (value === "" || value === null || value === 'null' || value === 'NULL') {
@@ -221,16 +226,16 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
   // Determine appropriate R command based on file extension
   const fileExtension = path.extname(filePath).toLowerCase();
   const loadCommand = fileExtension === '.rds' 
-    ? `obj <- readRDS("${filePath}")` 
-    : `load("${filePath}")`;
+    ? `obj <- readRDS("${filePath.replace(/\\/g, '\\\\')}")` 
+    : `load("${filePath.replace(/\\/g, '\\\\')}")`;
 
 // Run plot_relabund_heatmap command with user-defined parameters
   const outputDir = path.join(app.getPath('userData'), 'assets');
   const outputFilePath = path.join(outputDir, 'heatmap.pdf');
-  const rscriptPath = '/usr/local/bin/Rscript';
+  const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript';
   const scriptPath = isDev
-      ? path.join(__dirname, '..', 'R', 'plot_relabund_heatmap.R') // dev path
-      : path.join(process.resourcesPath, 'JAMS_BW_dev', 'R', 'plot_relabund_heatmap.R'); // prod path
+    ? path.join(__dirname, '..', 'R', 'plot_relabund_heatmap.R').replace(/\\/g, '\\\\') // dev path
+    : path.join(process.resourcesPath, 'JAMS_BW_dev', 'R', 'plot_relabund_heatmap.R').replace(/\\/g, '\\\\'); // prod path
 
   // Create output directory and log results
   try {
@@ -244,41 +249,165 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/ /g, '\\ ');
+  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
 
-  const script = `
-   ${rscriptPath} -e '
+  // Test if R can create a basic PDF first (add this before your main script)
+  const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
+  const testScript = `${rscriptPath} -e "pdf('${testPdfPath}'); plot(1:10); dev.off(); cat('Test PDF created')"`;
+
+  console.log('Testing basic PDF creation...');
+  exec(testScript, {shell: true}, (testError, testStdout, testStderr) => {
+    console.log(`Test output: ${testStdout}`);
+    if (testError) {
+      console.error(`Test error: ${testError.message}`);
+    }
+  });
+
+  // Now create a platform-specific script
+  let script;
+  if (process.platform === 'win32') {
+    // Write R script to a temporary file instead of using a long command line
+    const tempScriptPath = path.join(outputDir, 'temp_heatmap_script.R');
+    
+    // Create R script content
+    const rScriptContent = `
+      options(encoding = 'UTF-8')
+      load("${filePath.replace(/\\/g, '\\\\')}")
+      library(JAMS)
+      cat('JAMS library loaded\\n')
+      source("${scriptPath}")
+      cat('Source function loaded\\n')
+      pdf("${outputFilePath.replace(/\\/g, '\\\\')}")
+      cat('PDF device opened\\n')
+      tryCatch({
+        cat('Attempting to run plot_relabund_heatmap...\\n')
+        result <- plot_relabund_heatmap(${paramStr})
+        print(result)
+        cat('plot_relabund_heatmap completed successfully!\\n')
+      }, error = function(e) {
+        cat('ERROR IN R CODE: ', e$message, '\\n')
+      })
+      dev.off()
+      cat('PDF device closed\\n')
+    `;
+    
+    // Write the script to a file
+    fs.writeFileSync(tempScriptPath, rScriptContent);
+    console.log(`Temporary R script written to: ${tempScriptPath}`);
+    
+    // Create a simpler command that just runs the script file
+    script = `${rscriptPath} "${tempScriptPath}"`;
+  } else {
+    // macOS/Linux script
+    script = `
+    ${rscriptPath} -e '
     suppressPackageStartupMessages({
     suppressWarnings({
       options(encoding = "UTF-8");
       ${loadCommand}
       library(JAMS); 
+      cat("JAMS library loaded\\n")
       source("${scriptPath}");
+      cat("Source function loaded\\n")
       pdf("${escapedOutputPath}");
+      cat("PDF device opened\\n")
       tryCatch({
+        cat("Attempting to run plot_relabund_heatmap...\\n")
         plot_relabund_heatmap(${paramStr})
+        cat("plot_relabund_heatmap completed successfully!\\n")
       }, error = function(e) {
-        print(paste("Error:", e$message))
+        cat("ERROR IN R CODE: ", e$message, "\\n")
       })
       dev.off();
     })
     })'
-  `;
+    `;
+  }
 
   console.log('Executing command:', script);
 
+  // Use child_process.execFile for more reliable execution on Windows
+  const { execFile } = require('child_process');
+
   return new Promise((resolve, reject) => {
-    exec(script, (error, stdout, stderr) => {
-      if (error) {
-        reject(`Error: ${error.message}`);
-        return;
-      }
-      if (stderr) {
-        reject(`Stderr: ${stderr}`);
-        return;
-      }
-      resolve({ stdout: stdout, imagePath: outputFilePath });
-    });
+    if (process.platform === 'win32') {
+      // For Windows, run the script file directly
+      exec(script, {shell: true}, (error, stdout, stderr) => {
+        console.log(`R stdout: ${stdout}`);
+        
+        if (error) {
+          console.error(`Error executing script: ${error.message}`);
+          reject(`Error: ${error.message}`);
+          return;
+        }
+        
+        if (stderr) {
+          console.error(`R stderr: ${stderr}`);
+          // Check if the stderr contains actual errors
+          if (!stderr.toLowerCase().includes("warning") && stderr.toLowerCase().includes("error")) {
+            reject(`R error: ${stderr}`);
+            return;
+          }
+        }
+        
+        // Check if file exists and has content
+        console.log(`Checking if file exists: ${outputFilePath}`);
+        if (fs.existsSync(outputFilePath)) {
+          try {
+            const stats = fs.statSync(outputFilePath);
+            console.log(`Output file exists, size: ${stats.size} bytes`);
+            if (stats.size > 0) {
+              console.log(`Output file created: ${outputFilePath} (${stats.size} bytes)`);
+              resolve({ stdout: stdout, imagePath: outputFilePath });
+            } else {
+              console.error(`Output file is empty: ${outputFilePath}`);
+              reject("Output file was created but is empty");
+            }
+          } catch (statErr) {
+            console.error(`Error checking file stats: ${statErr.message}`);
+            reject(`Error checking file stats: ${statErr.message}`);
+          }
+        } else {
+          console.error(`Output file was not created: ${outputFilePath}`);
+          reject("Output file was not created");
+        }
+      });
+    } else {
+      // For macOS/Linux, use regular exec
+      exec(script, (error, stdout, stderr) => {
+        // Same handling as above
+        console.log(`R stdout: ${stdout}`);
+        if (error) {
+          console.error(`Error: ${error.message}`);
+          reject(`Error: ${error.message}`);
+          return;
+        }
+        
+        // Rest of the error handling...
+        if (stderr) {
+          console.error(`R stderr: ${stderr}`);
+          if (!stderr.toLowerCase().includes("warning")) {
+            reject(`Stderr: ${stderr}`);
+            return;
+          }
+        }
+        
+        // Check file exists
+        if (fs.existsSync(outputFilePath)) {
+          const stats = fs.statSync(outputFilePath);
+          if (stats.size > 0) {
+            console.log(`Output file created: ${outputFilePath} (${stats.size} bytes)`);
+            resolve({ stdout: stdout, imagePath: outputFilePath });
+          } else {
+            console.error(`Output file is empty: ${outputFilePath}`);
+            reject("Output file was created but is empty");
+          }
+        } else {
+          console.error(`Output file was not created: ${outputFilePath}`);
+          reject("Output file was not created");
+        }
+      });
+    }
   });
 });
 
@@ -335,7 +464,7 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
 // Run plot_Ordination command with user-defined parameters
   const outputDir = path.join(app.getPath('userData'), 'assets');
   const outputFilePath = path.join(outputDir, 'ordination.pdf');
-  const rscriptPath = '/usr/local/bin/Rscript';
+  const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript';
   const scriptPath = isDev
       ? path.join(__dirname, '..', 'R', 'plot_Ordination.R') // dev path
       : path.join(process.resourcesPath, 'JAMS_BW_dev', 'R', 'plot_Ordination.R'); // prod path
@@ -438,7 +567,7 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
 // Run plot_alphadiversity command with user-defined parameters
   const outputDir = path.join(app.getPath('userData'), 'assets');
   const outputFilePath = path.join(outputDir, 'alphaDiversity.pdf');
-  const rscriptPath = '/usr/local/bin/Rscript';
+  const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript';
   const scriptPath = isDev
       ? path.join(__dirname, '..', 'R', 'plot_alpha_diversity.R') // dev path
       : path.join(process.resourcesPath, 'JAMS_BW_dev', 'R', 'plot_alpha_diversity.R'); // prod path
@@ -532,7 +661,7 @@ ipcMain.handle('run-relabundFeatures-script', async (event, params) => {
 // Run plot_relabundfeatures command with user-defined parameters
   const outputDir = path.join(app.getPath('userData'), 'assets');
   const outputFilePath = path.join(outputDir, 'relabundFeatures.pdf');
-  const rscriptPath = '/usr/local/bin/Rscript';
+  const rscriptPath = process.platform === 'win32' ? 'Rscript' : '/usr/local/bin/Rscript';
   const scriptPath = isDev
       ? path.join(__dirname, '..', 'R', 'plot_relabund_features.R') // dev mode
       : path.join(process.resourcesPath, 'JAMS_BW_dev', 'R', 'plot_relabund_features.R'); // prod mode
