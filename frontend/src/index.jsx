@@ -11,6 +11,7 @@ import Heatmap from './components/Heatmap.jsx';
 import Ordination from './components/Ordination.jsx';
 import AlphaDiversity from './components/AlphaDiversity.jsx';
 import RelabundFeatures from './components/RelabundFeatures.jsx';
+import Workflows from './components/Workflows.jsx';
 import UpdateNotification from './components/UpdateNotification.jsx';
 
 function App() {
@@ -78,6 +79,9 @@ function App() {
                 <ListItem button onClick={handleNavigateTo('relabundfeatures')}>
                     <ListItemText primary="Relabund Features Analysis" />
                 </ListItem>
+                <ListItem button onClick={handleNavigateTo('workflows')}>
+                    <ListItemText primary="Saved Workflows" />
+                </ListItem>
                 <ListItem button onClick={handleToggleSettings}>
                     <ListItemText primary="Settings" />
                     {isSettingsOpen ? <ExpandLess /> : <ExpandMore />}
@@ -117,6 +121,7 @@ function App() {
                     {currentPage === 'ordination' && <Ordination handleNavigateTo={handleNavigateTo} />}
                     {currentPage === 'alphadiversity' && <AlphaDiversity handleNavigateTo={handleNavigateTo} />}
                     {currentPage === 'relabundfeatures' && <RelabundFeatures handleNavigateTo={handleNavigateTo} />}
+                    {currentPage === 'workflows' && <Workflows handleNavigateTo={handleNavigateTo} />}
                 </div>
 
                 {/* Settings Icon in top-right corner */}
