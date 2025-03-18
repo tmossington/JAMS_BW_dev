@@ -533,7 +533,7 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
         cat('PDF device opened\\n')
         tryCatch({
           cat('Attempting to run plot_Ordination...\\n')
-          result <- plot_Ordination(${paramStr})
+          result <- print(plot_Ordination(${paramStr}))
           print(result)
           cat('plot_Ordination completed successfully!\\n')
         }, error = function(e) {
@@ -569,7 +569,7 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
         cat("PDF device opened\\n")
         tryCatch({
           cat("Attempting to run plot_Ordination...\\n")
-          plot_Ordination(${paramStr})
+          print(plot_Ordination(${paramStr}))
           cat("plot_Ordination completed successfully!\\n")
         }, error = function(e) {
           cat("ERROR IN R CODE: ", e$message, "\\n")
@@ -806,7 +806,7 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
         library(JAMS); 
         source("${scriptPath}");
         pdf("${escapedOutputPath}", paper = "a4r");
-        print(plot_alpha_diversity(${paramStr}))
+        plot_alpha_diversity(${paramStr})
         dev.off();
         })
       })'
