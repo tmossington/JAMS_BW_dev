@@ -158,16 +158,29 @@ repos <- "https://cloud.r-project.org"
 
 ##### TEMPORARY FIX FOR BENCHMARKME #####
 
-# Remove the global benchmarkme package if it is already installed
-if ("benchmarkme" %in% rownames(installed.packages())) {
-    remove.packages("benchmarkme", lib = rlibs)
+if(!("devtools" %in% rownames(installed.packages()))) {
+    install.packages("devtools", repos = repos, update = TRUE, lib = rlibs)
 }
+require("devtools")
+
+# Safely check and remove benchmarkme if it exists
+tryCatch({
+    if("benchmarkme" %in% rownames(installed.packages())) {
+        remove.packages("benchmarkme", lib = rlibs)
+    }
+}, error = function(e) {
+    cat("Note: benchmarkme was not found or could not be removed. Will install fresh copy.\n")
+})
 
 # Install your local version of benchmarkme
+cat("Installing custom benchmarkme package...\n")
 devtools::install_github("tmossington/benchmarkme@fix-win-ram-reporting", lib = rlibs)
 
-# ensure local version is loaded
-require("benchmarkme")
+if ("benchmarkme" %in% rownames(installed.packages())) {
+    require("benchmarkme")
+} else {
+    stop("Failed to install benchmarkme package. Aborting installation.")
+}
 
 if(!(all((c("devtools", "stringr", "parallel", "BiocManager", "prettyunits") %in% rownames(installed.packages()))))){
     install.packages(c("devtools", "stringr", "parallel", "BiocManager", "prettyunits"), repos = repos, update = TRUE, lib = rlibs)
