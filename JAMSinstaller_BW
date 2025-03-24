@@ -2,6 +2,36 @@
 if ((.Platform$OS.type) != "unix"){
     cat("JAMS was written for UNIX systems. It looks like you may be on Windows. Will try installing JAMSbeta. For JAMSalpha, use a Unix system.")
     OnUnix <- FALSE
+
+    # Check if Windows user has writable library access
+    rlibs <- .libPaths()[1]
+    dir_test <- file.path(rlibs, ".write_test")
+    can_write <- tryCatch({
+        dir.create(dir_test, showWarnings = FALSE)
+        if (file.exists(dir_test)) {
+            unlink(dir_test, recursive = TRUE)
+            TRUE
+        } else {
+            FALSE
+        }
+    }, error = function(e) {
+        return(FALSE)
+    })
+
+    # If can't write to main library, create a user library
+    if (!can_write) {
+        cat("Main R library at", rlibs, "is not writable.\n")
+        user_lib <- file.path(Sys.getenv("USERPROFILE"), "R", "win-library", R.version$major, ".", as.character(getRversion()))
+        if (!dir.exists(user_lib)) {
+            dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+            cat("Created personal R library at:", user_lib, "\n")
+        } else {
+            cat("Using existing personal R library at:", user_lib, "\n")
+        }
+        .libPaths(c(user_lib, .libPaths()))
+        rlibs <- user_lib
+        cat("set R library location to:", rlibs, "\n")
+    }
 } else {
     OnUnix <- TRUE
 }
