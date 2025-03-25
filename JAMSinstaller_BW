@@ -3,6 +3,60 @@ if ((.Platform$OS.type) != "unix"){
     cat("JAMS was written for UNIX systems. It looks like you may be on Windows. Will try installing JAMSbeta. For JAMSalpha, use a Unix system.")
     OnUnix <- FALSE
 
+
+     # Check if RTools is installed
+    has_rtools <- FALSE
+    tryCatch({
+        has_rtools <- devtools::find_rtools()
+    }, error = function(e) {
+        has_rtools <- FALSE
+    })
+    
+    if (!has_rtools) {
+        cat("RTools is not installed or not found. It's required for installing packages from source on Windows.\n")
+        cat("Attempting to install/configure RTools...\n")
+        
+        # Get R version to determine which RTools version to install
+        r_ver <- as.numeric(R.version$major) + as.numeric(R.version$minor)/10
+        
+        # Download and install RTools based on R version
+        if (r_ver >= 4.3) {
+            rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools43/files/rtools43-5550-5548.exe"
+            rtools_installer <- file.path(tempdir(), "rtools43-installer.exe")
+        } else if (r_ver >= 4.0) {
+            rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools40-x86_64.exe"
+            rtools_installer <- file.path(tempdir(), "rtools40-installer.exe")
+        } else {
+            cat("Your R version is too old. Please upgrade to R 4.0 or newer.\n")
+            stop("R version not compatible with current RTools versions.")
+        }
+        
+        cat("Downloading RTools installer...\n")
+        download.file(rtools_url, rtools_installer, mode = "wb")
+        
+        cat("Installing RTools. Please follow the installation prompts.\n")
+        cat("IMPORTANT: Make sure to check the option to 'Add rtools to system PATH'.\n")
+        system(rtools_installer)
+        
+        # Check if installation was successful
+        Sys.sleep(5)  # Wait for installer to finish
+        has_rtools <- tryCatch({
+            devtools::find_rtools()
+        }, error = function(e) {
+            FALSE
+        })
+        
+        if (has_rtools) {
+            cat("RTools installation successful!\n")
+        } else {
+            cat("RTools installation may not have completed successfully.\n")
+            cat("You may need to install RTools manually from https://cran.r-project.org/bin/windows/Rtools/\n")
+            cat("Continuing with installation, but some packages might fail to compile...\n")
+        }
+    } else {
+        cat("RTools is already installed. Proceeding with installation.\n")
+    }
+
     # Check if Windows user has writable library access
     rlibs <- .libPaths()[1]
     dir_test <- file.path(rlibs, ".write_test")
