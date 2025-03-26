@@ -19,19 +19,51 @@ if ((.Platform$OS.type) != "unix"){
         # Get R version to determine which RTools version to install
         r_ver <- as.numeric(R.version$major) + as.numeric(R.version$minor)/10
         
-        # Download and install RTools based on R version
-        if (r_ver >= 4.3) {
-            rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools43/files/rtools43-5550-5548.exe"
-            rtools_installer <- file.path(tempdir(), "rtools43-installer.exe")
-        } else if (r_ver >= 4.0) {
-            rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools40-x86_64.exe"
-            rtools_installer <- file.path(tempdir(), "rtools40-installer.exe")
-        } else {
-            cat("Your R version is too old. Please upgrade to R 4.0 or newer.\n")
-            stop("R version not compatible with current RTools versions.")
+        # Function to dynamically fetch the latest RTools URL
+        get_latest_rtools_url <- function() {
+            # Fetch the RTools download page
+            cran_rtools_page <- "https://cran.r-project.org/bin/windows/Rtools/"
+            page_content <- tryCatch({
+                readLines(cran_rtools_page, warn = FALSE)
+            }, error = function(e) {
+                cat("Error fetching RTools page. Falling back to hardcoded URLs.\n")
+                return(NULL)
+            })
+            
+            if (is.null(page_content)) {
+                return(NULL)
+            }
+            
+            # Extract links to .exe files
+            rtools_links <- grep("rtools[0-9]+.*\\.exe", page_content, value = TRUE)
+            rtools_links <- regmatches(rtools_links, gregexpr("rtools[0-9]+.*?\\.exe", rtools_links))
+            rtools_links <- unique(unlist(rtools_links))
+            
+            if (length(rtools_links) == 0) {
+                cat("Could not extract RTools download links. Using fallback URLs.\n")
+                return(NULL)
+            }
+            
+            # Construct full URLs
+            latest_rtools <- paste0(cran_rtools_page, "files/", rtools_links[length(rtools_links)])
+            return(latest_rtools)
         }
-        
-        cat("Downloading RTools installer...\n")
+
+        # Determine RTools URL dynamically or use fallback
+        rtools_url <- get_latest_rtools_url()
+        if (is.null(rtools_url)) {
+            if (r_ver >= 4.3) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools43/files/rtools43-5550-5548.exe"
+            } else if (r_ver >= 4.0) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools40-x86_64.exe"
+            } else {
+                stop("Your R version is too old. Please upgrade to R 4.0 or newer.")
+            }
+        }
+
+        rtools_installer <- file.path(tempdir(), basename(rtools_url))
+
+        cat("Downloading RTools installer from:", rtools_url, "\n")
         download.file(rtools_url, rtools_installer, mode = "wb")
         
         cat("Installing RTools. Please follow the installation prompts.\n")
@@ -138,7 +170,7 @@ if (length(args) > 0){
 #}
 
 homefolder <- as.character(Sys.getenv("HOME"))
-if ("--linnkto" %in% (as.character(args))){
+if ("--linkto" %in% (as.character(args))){
     linkto <- args[(which(args) == "--linkto") + 1]
 } else {
     linkto <- file.path(homefolder, "bin")
