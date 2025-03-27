@@ -7,7 +7,7 @@ if ((.Platform$OS.type) != "unix"){
      # Check if RTools is installed
     has_rtools <- FALSE
     tryCatch({
-        has_rtools <- devtools::find_rtools()
+        has_rtools <- pkgbuild::find_rtools()
     }, error = function(e) {
         has_rtools <- FALSE
     })
@@ -52,14 +52,17 @@ if ((.Platform$OS.type) != "unix"){
         # Determine RTools URL dynamically or use fallback
         rtools_url <- get_latest_rtools_url()
         if (is.null(rtools_url)) {
-            if (r_ver >= 4.3) {
-                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools43/files/rtools43-5550-5548.exe"
-            } else if (r_ver >= 4.0) {
-                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools40-x86_64.exe"
+            if (r_ver >= 4.4) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-6459-6401.exe"
+            } else if (r_ver >= 4.3) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools43/files/rtools43-5976-5975.exe"
+            } else if (r_ver >= 4.2) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools42/files/rtools42-5355-5357.exe"
             } else {
-                stop("Your R version is too old. Please upgrade to R 4.0 or newer.")
+                stop("Your R version is too old. Please upgrade to R 4.2 or newer.")
             }
         }
+
 
         rtools_installer <- file.path(tempdir(), basename(rtools_url))
 
