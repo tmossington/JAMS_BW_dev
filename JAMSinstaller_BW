@@ -3,17 +3,27 @@ if ((.Platform$OS.type) != "unix"){
     cat("JAMS was written for UNIX systems. It looks like you may be on Windows. Will try installing JAMSbeta. For JAMSalpha, use a Unix system.")
     OnUnix <- FALSE
 
+    # Manually check if RTools is installed by looking for 'make'
+    is_rtools_installed <- function() {
+        make_path <- Sys.which("make")
+        if (make_path == "") {
+            return(FALSE)
+        } else {
+            return(TRUE)
+        }
+    }
 
-     # Check if RTools is installed
-    has_rtools <- FALSE
-    tryCatch({
-        has_rtools <- pkgbuild::find_rtools()
-    }, error = function(e) {
+    # Use the function to check for RTools
+    if (is_rtools_installed()) {
+        cat("RTools is installed and 'make' is available in the PATH.\n")
+        has_rtools <- TRUE
+    } else {
+        cat("RTools is not installed or 'make' is not in the PATH.\n")
         has_rtools <- FALSE
-    })
+    }
     
     if (!has_rtools) {
-        cat("RTools is not installed or not found. It's required for installing packages from source on Windows.\n")
+        cat("RTools is not installed or not found. Attempting to install RTools...\n")
         cat("Attempting to install/configure RTools...\n")
         
         # Get R version to determine which RTools version to install
@@ -49,6 +59,9 @@ if ((.Platform$OS.type) != "unix"){
             return(latest_rtools)
         }
 
+        # Set download method for Windows
+        options(download.file.method = "wininet")
+
         # Determine RTools URL dynamically or use fallback
         rtools_url <- get_latest_rtools_url()
         if (is.null(rtools_url)) {
@@ -63,11 +76,15 @@ if ((.Platform$OS.type) != "unix"){
             }
         }
 
-
         rtools_installer <- file.path(tempdir(), basename(rtools_url))
 
         cat("Downloading RTools installer from:", rtools_url, "\n")
-        download.file(rtools_url, rtools_installer, mode = "wb")
+        tryCatch({
+            download.file(rtools_url, rtools_installer, mode = "wb")
+        }, error = function(e) {
+            cat("Failed to download RTools. Please download it manually from:", rtools_url, "\n")
+            stop(e)
+        })
         
         cat("Installing RTools. Please follow the installation prompts.\n")
         cat("IMPORTANT: Make sure to check the option to 'Add rtools to system PATH'.\n")
@@ -89,7 +106,7 @@ if ((.Platform$OS.type) != "unix"){
             cat("Continuing with installation, but some packages might fail to compile...\n")
         }
     } else {
-        cat("RTools is already installed. Proceeding with installation.\n")
+        cat("RTools is already installed and detected. Skipping installation.\n")
     }
 
     # Check if Windows user has writable library access
@@ -172,17 +189,29 @@ if (length(args) > 0){
     binexecs <- c("JAMSalpha", "JAMSbeta", "JAMS16", "JAMSbuildk2db", "JAMSjoinlanes", "JAMSmakeswarm", "JAMSbankit", "JAMSfastqprefixrenamer")
 #}
 
-homefolder <- as.character(Sys.getenv("HOME"))
-if ("--linkto" %in% (as.character(args))){
+# Determine the home folder dynamically
+homefolder <- Sys.getenv("HOME")
+if (homefolder == "") {
+    homefolder <- Sys.getenv("USERPROFILE")  # Fallback for Windows
+}
+
+# Handle the --linkto argument or default to a platform-specific location
+if ("--linkto" %in% (as.character(args))) {
     linkto <- args[(which(args) == "--linkto") + 1]
 } else {
-    linkto <- file.path(homefolder, "bin")
+    if (.Platform$OS.type == "windows") {
+        linkto <- file.path(Sys.getenv("USERPROFILE"), "bin")
+    } else {
+        linkto <- file.path(homefolder, "bin")
+    }
 }
 
-if (!file.exists(linkto)){
-    stop(paste("The specified folder for creating executable symbolic links does not exist:", linkto))
+# Ensure the folder exists or create it dynamically
+if (!file.exists(linkto)) {
+    cat(paste("The specified folder for creating executable symbolic links does not exist:", linkto, "\n"))
+    cat("Creating the folder...\n")
+    dir.create(linkto, recursive = TRUE, showWarnings = FALSE)
 }
-
 
 if ("--force" %in% (as.character(args))){
     force_install <- TRUE
