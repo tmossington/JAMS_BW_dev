@@ -86,18 +86,25 @@ if ((.Platform$OS.type) != "unix"){
             stop(e)
         })
         
+        # Launch RTools installer and wait for user confirmation
         cat("Installing RTools. Please follow the installation prompts.\n")
         cat("IMPORTANT: Make sure to check the option to 'Add rtools to system PATH'.\n")
-        system(rtools_installer)
-        
-        # Check if installation was successful
-        Sys.sleep(5)  # Wait for installer to finish
+        cat("The installer will open in a separate window. Complete the installation and return here.\n")
+
+        # Launch the installer without blocking the script
+        shell.exec(rtools_installer)
+
+        # Wait for user confirmation
+        cat("Press [Enter] once you have completed the RTools installation...\n")
+        readLines("stdin", n = 1)
+
+        # Recheck if RTools is installed
         has_rtools <- tryCatch({
-            devtools::find_rtools()
+            is_rtools_installed()
         }, error = function(e) {
             FALSE
         })
-        
+
         if (has_rtools) {
             cat("RTools installation successful!\n")
         } else {
