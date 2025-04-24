@@ -13,9 +13,7 @@ define_kinds_of_variables <- function(metadataXL = NULL, phenolabels = NULL, phe
     }
 
     if (is.null(phenolabels)){
-        if (verbose){
-            flog.info("Imputing types of columns on the metadata.")
-        }
+        flog.info("Imputing types of columns on the metadata.")
         Var_label <- colnames(phenotable)
         Var_type <- sapply(Var_label, function (x) { infer_column_type(phenotable = phenotable, colm = x, class_to_ignore = class_to_ignore) } )
         phenolabels <- data.frame(Var_label = unname(Var_label), Var_type = unname(Var_type), stringsAsFactors = FALSE)
@@ -79,9 +77,7 @@ define_kinds_of_variables <- function(metadataXL = NULL, phenolabels = NULL, phe
             flog.info(paste("Keeping subsettable variables", paste0(variables_subs, collapse=", ")))
         }
     } else {
-        if (verbose){
-            flog.info("Found no subsettable variables.")
-        }
+        flog.info("Found no subsettable variables.")
     }
     variable_list$subsettable <- as.character(variables_subs)
 
