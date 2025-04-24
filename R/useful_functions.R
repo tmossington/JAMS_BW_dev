@@ -802,3 +802,4 @@ post_message <- function(msg = NULL, face = "plain", just = "centre", color = "b
     tgrob <- text_grob(text_msg, face = face, color = color, just = just, size = size)
     print(as_ggplot(tgrob))
 }
+
