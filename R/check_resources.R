@@ -6,7 +6,7 @@
 check_resources <- function(opt = opt, applications_to_check = c("base", "reads", "assembly", "kraken", "host", "annotation", "16S", "blast")){
     opt$abort <- FALSE
 
-    deplist <- list(base = c("pigz", "wget"), reads = c("sratoolkit", "trimmomatic"), host = c("bowtie2"), assembly = c("megahit", "spades", "samtools", "metabat2"), annotation = c("prokka", "convert2bed", "bedtools"), kraken = "kraken2")
+    deplist <- list(base = c("pigz", "wget"), reads = c("sratoolkit", "trimmomatic"), host = c("bowtie2"), assembly = c("megahit", "spades", "samtools", "metabat2", "checkm2"), annotation = c("prokka", "convert2bed", "bedtools"), kraken = "kraken2")
 
     dependencies_to_check <- unname(unlist(deplist[applications_to_check]))
 
@@ -49,6 +49,8 @@ check_resources <- function(opt = opt, applications_to_check = c("base", "reads"
                 flog.info("It seems there is not enough RAM memory to use the kraken2 database supplied. Try again on a system with more RAM. Aborting.")
                 opt$abort <- TRUE
             } else {
+                #Pass path to opt$opt$workingkrakendb for backwards compatibility
+                opt$workingkrakendb <- opt$krakendb
                 if (file.exists(file.path(opt$krakendb, "JAMSKdb.ver"))){
                     opt$JAMS_Kdb_Version <- as.character(read.table(file.path(opt$krakendb, "JAMSKdb.ver"), header=FALSE, quote=NULL)[1,1])
                 } else {
@@ -58,7 +60,7 @@ check_resources <- function(opt = opt, applications_to_check = c("base", "reads"
             }
         }
         flog.info("Checking for presence of CheckM database")
-        checkmfiles <- list.files(opt$dbdir, recursive=TRUE, full.names=TRUE, include.dirs=FALSE, pattern="taxon_marker_sets.tsv")
+        checkmfiles <- list.files(opt$dbdir, recursive=TRUE, full.names=TRUE, include.dirs=FALSE, pattern="*.dmnd")
         if (length(checkmfiles) > 0){
             opt$CheckMdb <- paste0(unlist(strsplit(checkmfiles[1], split="/"))[1:length(unlist(strsplit(checkmfiles[1], split="/")))-1], collapse="/")
         } else {
