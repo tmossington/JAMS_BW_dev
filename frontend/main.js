@@ -255,7 +255,9 @@ ipcMain.handle('run-heatmap-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
@@ -496,7 +498,9 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
@@ -529,7 +533,7 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
         cat('PDF device opened\\n')
         tryCatch({
           cat('Attempting to run plot_Ordination...\\n')
-          result <- plot_Ordination(${paramStr})
+          result <- print(plot_Ordination(${paramStr}))
           print(result)
           cat('plot_Ordination completed successfully!\\n')
         }, error = function(e) {
@@ -565,7 +569,7 @@ ipcMain.handle('run-ordination-script', async (event, params) => {
         cat("PDF device opened\\n")
         tryCatch({
           cat("Attempting to run plot_Ordination...\\n")
-          plot_Ordination(${paramStr})
+          print(plot_Ordination(${paramStr}))
           cat("plot_Ordination completed successfully!\\n")
         }, error = function(e) {
           cat("ERROR IN R CODE: ", e$message, "\\n")
@@ -738,8 +742,9 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
     console.error(`Error creating directory: ${err}`);
   }
 
-  // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
@@ -794,31 +799,17 @@ ipcMain.handle('run-alphaDiversity-script', async (event, params) => {
   } else {
     // macOS/Linux script
     script = `
-    ${rscriptPath} -e '
-    suppressPackageStartupMessages({
-    suppressWarnings({
-      options(encoding = "UTF-8");
-      tryCatch({
-        ${loadCommand}
+      ${rscriptPath} -e '
+        suppressPackageStartupMessages({
+        suppressWarnings({
+        ${loadCommand};
         library(JAMS); 
-        cat("JAMS library loaded\\n")
         source("${scriptPath}");
-        cat("Source function loaded\\n")
-        pdf("${escapedOutputPath}");
-        cat("PDF device opened\\n")
-        tryCatch({
-          cat("Attempting to run plot_alpha_diversity...\\n")
-          plot_alpha_diversity(${paramStr})
-          cat("plot_alpha_diversity completed successfully!\\n")
-        }, error = function(e) {
-          cat("ERROR IN R CODE: ", e$message, "\\n")
-        })
+        pdf("${escapedOutputPath}", paper = "a4r");
+        plot_alpha_diversity(${paramStr})
         dev.off();
-      }, error = function(e) {
-        cat("ERROR LOADING FILE: ", e$message, "\\n")
-      })
-    })
-    })'
+        })
+      })'
     `;
   }
 
@@ -979,7 +970,9 @@ ipcMain.handle('run-relabundFeatures-script', async (event, params) => {
   }
 
   // Escape spaces in file path for R
-  const escapedOutputPath = outputFilePath.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
+  const escapedOutputPath = process.platform === 'win32'
+  ? `"${outputFilePath.replace(/\\/g, '\\\\')}"`
+  : outputFilePath.replace(/ /g, '\\ ');
 
   // Test if R can create a basic PDF first (add this before your main script)
   const testPdfPath = path.join(outputDir, 'test.pdf').replace(/\\/g, '\\\\');
