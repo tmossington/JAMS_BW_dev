@@ -2,6 +2,149 @@
 if ((.Platform$OS.type) != "unix"){
     cat("JAMS was written for UNIX systems. It looks like you may be on Windows. Will try installing JAMSbeta. For JAMSalpha, use a Unix system.")
     OnUnix <- FALSE
+
+    # Manually check if RTools is installed by looking for 'make'
+    is_rtools_installed <- function() {
+        make_path <- Sys.which("make")
+        if (make_path == "") {
+            return(FALSE)
+        } else {
+            return(TRUE)
+        }
+    }
+
+    # Use the function to check for RTools
+    if (is_rtools_installed()) {
+        cat("RTools is installed and 'make' is available in the PATH.\n")
+        has_rtools <- TRUE
+    } else {
+        cat("RTools is not installed or 'make' is not in the PATH.\n")
+        has_rtools <- FALSE
+    }
+    
+    if (!has_rtools) {
+        cat("RTools is not installed or not found. Attempting to install RTools...\n")
+        cat("Attempting to install/configure RTools...\n")
+        
+        # Get R version to determine which RTools version to install
+        r_ver <- as.numeric(R.version$major) + as.numeric(R.version$minor)/10
+        
+        # Function to dynamically fetch the latest RTools URL
+        get_latest_rtools_url <- function() {
+            # Fetch the RTools download page
+            cran_rtools_page <- "https://cran.r-project.org/bin/windows/Rtools/"
+            page_content <- tryCatch({
+                readLines(cran_rtools_page, warn = FALSE)
+            }, error = function(e) {
+                cat("Error fetching RTools page. Falling back to hardcoded URLs.\n")
+                return(NULL)
+            })
+            
+            if (is.null(page_content)) {
+                return(NULL)
+            }
+            
+            # Extract links to .exe files
+            rtools_links <- grep("rtools[0-9]+.*\\.exe", page_content, value = TRUE)
+            rtools_links <- regmatches(rtools_links, gregexpr("rtools[0-9]+.*?\\.exe", rtools_links))
+            rtools_links <- unique(unlist(rtools_links))
+            
+            if (length(rtools_links) == 0) {
+                cat("Could not extract RTools download links. Using fallback URLs.\n")
+                return(NULL)
+            }
+            
+            # Construct full URLs
+            latest_rtools <- paste0(cran_rtools_page, "files/", rtools_links[length(rtools_links)])
+            return(latest_rtools)
+        }
+
+        # Set download method for Windows
+        options(download.file.method = "wininet")
+
+        # Determine RTools URL dynamically or use fallback
+        rtools_url <- get_latest_rtools_url()
+        if (is.null(rtools_url)) {
+            if (r_ver >= 4.4) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-6459-6401.exe"
+            } else if (r_ver >= 4.3) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools43/files/rtools43-5976-5975.exe"
+            } else if (r_ver >= 4.2) {
+                rtools_url <- "https://cran.r-project.org/bin/windows/Rtools/rtools42/files/rtools42-5355-5357.exe"
+            } else {
+                stop("Your R version is too old. Please upgrade to R 4.2 or newer.")
+            }
+        }
+
+        rtools_installer <- file.path(tempdir(), basename(rtools_url))
+
+        cat("Downloading RTools installer from:", rtools_url, "\n")
+        tryCatch({
+            download.file(rtools_url, rtools_installer, mode = "wb")
+        }, error = function(e) {
+            cat("Failed to download RTools. Please download it manually from:", rtools_url, "\n")
+            stop(e)
+        })
+        
+        # Launch RTools installer and wait for user confirmation
+        cat("Installing RTools. Please follow the installation prompts.\n")
+        cat("IMPORTANT: Make sure to check the option to 'Add rtools to system PATH'.\n")
+        cat("The installer will open in a separate window. Complete the installation and return here.\n")
+
+        # Launch the installer without blocking the script
+        shell.exec(rtools_installer)
+
+        # Wait for user confirmation
+        cat("Press [Enter] once you have completed the RTools installation...\n")
+        readLines("stdin", n = 1)
+
+        # Recheck if RTools is installed
+        has_rtools <- tryCatch({
+            is_rtools_installed()
+        }, error = function(e) {
+            FALSE
+        })
+
+        if (has_rtools) {
+            cat("RTools installation successful!\n")
+        } else {
+            cat("RTools installation may not have completed successfully.\n")
+            cat("You may need to install RTools manually from https://cran.r-project.org/bin/windows/Rtools/\n")
+            cat("Continuing with installation, but some packages might fail to compile...\n")
+        }
+    } else {
+        cat("RTools is already installed and detected. Skipping installation.\n")
+    }
+
+    # Check if Windows user has writable library access
+    rlibs <- .libPaths()[1]
+    dir_test <- file.path(rlibs, ".write_test")
+    can_write <- tryCatch({
+        dir.create(dir_test, showWarnings = FALSE)
+        if (file.exists(dir_test)) {
+            unlink(dir_test, recursive = TRUE)
+            TRUE
+        } else {
+            FALSE
+        }
+    }, error = function(e) {
+        return(FALSE)
+    })
+
+    # If can't write to main library, create a user library
+    if (!can_write) {
+        cat("Main R library at", rlibs, "is not writable.\n")
+        user_lib <- file.path(Sys.getenv("USERPROFILE"), "R", "win-library", R.version$major, ".", as.character(getRversion()))
+        if (!dir.exists(user_lib)) {
+            dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+            cat("Created personal R library at:", user_lib, "\n")
+        } else {
+            cat("Using existing personal R library at:", user_lib, "\n")
+        }
+        .libPaths(c(user_lib, .libPaths()))
+        rlibs <- user_lib
+        cat("set R library location to:", rlibs, "\n")
+    }
 } else {
     OnUnix <- TRUE
 }
@@ -53,17 +196,29 @@ if (length(args) > 0){
     binexecs <- c("JAMSalpha", "JAMSbeta", "JAMS16", "JAMSbuildk2db", "JAMSjoinlanes", "JAMSmakeswarm", "JAMSbankit", "JAMSfastqprefixrenamer")
 #}
 
-homefolder <- as.character(Sys.getenv("HOME"))
-if ("--linnkto" %in% (as.character(args))){
+# Determine the home folder dynamically
+homefolder <- Sys.getenv("HOME")
+if (homefolder == "") {
+    homefolder <- Sys.getenv("USERPROFILE")  # Fallback for Windows
+}
+
+# Handle the --linkto argument or default to a platform-specific location
+if ("--linkto" %in% (as.character(args))) {
     linkto <- args[(which(args) == "--linkto") + 1]
 } else {
-    linkto <- file.path(homefolder, "bin")
+    if (.Platform$OS.type == "windows") {
+        linkto <- file.path(Sys.getenv("USERPROFILE"), "bin")
+    } else {
+        linkto <- file.path(homefolder, "bin")
+    }
 }
 
-if (!file.exists(linkto)){
-    stop(paste("The specified folder for creating executable symbolic links does not exist:", linkto))
+# Ensure the folder exists or create it dynamically
+if (!file.exists(linkto)) {
+    cat(paste("The specified folder for creating executable symbolic links does not exist:", linkto, "\n"))
+    cat("Creating the folder...\n")
+    dir.create(linkto, recursive = TRUE, showWarnings = FALSE)
 }
-
 
 if ("--force" %in% (as.character(args))){
     force_install <- TRUE
@@ -158,16 +313,29 @@ repos <- "https://cloud.r-project.org"
 
 ##### TEMPORARY FIX FOR BENCHMARKME #####
 
-# Remove the global benchmarkme package if it is already installed
-if ("benchmarkme" %in% rownames(installed.packages())) {
-    remove.packages("benchmarkme", lib = rlibs)
+if(!("devtools" %in% rownames(installed.packages()))) {
+    install.packages("devtools", repos = repos, update = TRUE, lib = rlibs)
 }
+require("devtools")
+
+# Safely check and remove benchmarkme if it exists
+tryCatch({
+    if("benchmarkme" %in% rownames(installed.packages())) {
+        remove.packages("benchmarkme", lib = rlibs)
+    }
+}, error = function(e) {
+    cat("Note: benchmarkme was not found or could not be removed. Will install fresh copy.\n")
+})
 
 # Install your local version of benchmarkme
+cat("Installing custom benchmarkme package...\n")
 devtools::install_github("tmossington/benchmarkme@fix-win-ram-reporting", lib = rlibs)
 
-# ensure local version is loaded
-require("benchmarkme")
+if ("benchmarkme" %in% rownames(installed.packages())) {
+    require("benchmarkme")
+} else {
+    stop("Failed to install benchmarkme package. Aborting installation.")
+}
 
 if(!(all((c("devtools", "stringr", "parallel", "BiocManager", "prettyunits") %in% rownames(installed.packages()))))){
     install.packages(c("devtools", "stringr", "parallel", "BiocManager", "prettyunits"), repos = repos, update = TRUE, lib = rlibs)
