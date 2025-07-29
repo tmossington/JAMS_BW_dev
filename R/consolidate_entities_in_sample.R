@@ -8,15 +8,19 @@ consolidate_entities_in_sample <- function(opt = opt){
 
     flog.info("Consolidating entities in sample")
 
+    setwd(opt$sampledir)
+
+    opt$contigsdata$PPM <- round(((opt$contigsdata$NumBases / sum(opt$contigsdata$NumBases)) * 1E6), 0)
+
     Quality_levels_pecking_order <- c("HQ", "MHQ", "MQ", "LQ", "Contaminated")
 
     #Ensure contigsdata rownames
     rownames(opt$contigsdata) <- opt$contigsdata$Contig
-    #Copy congtigsdata to subset as contigs are vetted and accounted for.
-    opt$contigsdata_unused <- opt$contigsdata
     #Mark opt$contigsdata with information of how contig was consolidated.
     opt$contigsdata$Consolidation_from <- NA
     opt$contigsdata$ConsolidatedGenomeBin <- NA
+    #Copy congtigsdata to subset as contigs are vetted and accounted for.
+    opt$contigsdata_unused <- opt$contigsdata
 
     consolidated_entities <- NULL
 
@@ -71,8 +75,98 @@ consolidate_entities_in_sample <- function(opt = opt){
             rownames(surviving_MAGs_df) <- surviving_MAGs_df$ConsolidatedGenomeBin
             consolidated_entities <- rbind(consolidated_entities, surviving_MAGs_df)
 
+            #PPMs will be recalculated at the end after consolidation
+            consolidated_entities$PPM <- NA
+
             #Remove these contigs from opt$contigsdata_unused
             opt$contigsdata_unused <- opt$contigsdata_unused[opt$contigsdata[which(is.na(opt$contigsdata$ConsolidatedGenomeBin)), "Contig"], , drop = FALSE]
+
+            #Check whether any of the missing completenesses are lurking in contigsdata_unused
+            MAGs_to_complete_df <- subset(surviving_MAGs_df, Completeness < 99)
+            #Disconsider MAGs which have more than one bin attributed to the same species, as it would be imprudent to attribute unused contigs of these LKTs to one MAG or other.
+            MAGs_to_complete_df <- MAGs_to_complete_df[!duplicated(MAGs_to_complete_df$Species), ]
+            #Also, only assess if the MB2 MAG taxonomy is either at the strain or species level.
+            MAGs_to_complete_df <- MAGs_to_complete_df[which(MAGs_to_complete_df$NCBI_taxonomic_rank %in% c("strain", "species")), ]
+
+            if (nrow(MAGs_to_complete_df) > 0){
+                flog.info("Assessing enhancement of HQ or MHQ MetaBAT2 bins with unused contigs.")
+                MAGs_to_complete_df$Assess <- TRUE
+                MTC_MB2_contig_list <- list()
+                MTC_unused_contig_list <- list()
+                for (MTC in MAGs_to_complete_df$ConsolidatedGenomeBin){
+                    curr_MTC_contigs <- opt$contigsdata[which(opt$contigsdata$ConsolidatedGenomeBin == MTC) , "Contig"]
+                    curr_MTC_species <- MAGs_to_complete_df[MTC, "Species"]
+                    #Check if there is anything available which is not unclassified or missing
+                    if ((!(curr_MTC_species %in% c("s__Unclassified", "s__Missing"))) && any(opt$contigsdata_unused$Species == curr_MTC_species)){
+                        MTC_MB2_contig_list[[MTC]] <- curr_MTC_contigs
+                        MTC_unused_contig_list[[MTC]] <- opt$contigsdata_unused[which(opt$contigsdata_unused$Species == curr_MTC_species), "Contig"]
+                    } else {
+                        #Mark as unable to complement
+                        MAGs_to_complete_df[MTC, "Assess"] <- FALSE
+                    }
+                    #Reset vectors out of neuroticism
+                    curr_MTC_contigs <- NULL
+                    curr_MTC_species <- NULL
+                }
+                MAGs_to_complete_df <- MAGs_to_complete_df[which(MAGs_to_complete_df$Assess == TRUE), ]
+                #Only proceed if suitable unused contigs were found.
+                if (length(MTC_MB2_contig_list) > 0){
+                    #Write joint contigs to system and evaluate with CheckM2
+
+                    curr_bin_output_folder <- file.path(opt$sampledir, "temp_bins")
+                    #ensure there is no standing bin output folder
+                    unlink(curr_bin_output_folder, recursive = TRUE)
+                    dir.create(curr_bin_output_folder, showWarnings = TRUE, recursive = TRUE)
+                    for (wantedtaxon in names(MTC_MB2_contig_list)){
+                        curr_fn <- paste(wantedtaxon, "fasta", sep = ".")
+                        curr_contigs_names <- c(MTC_MB2_contig_list[[wantedtaxon]], MTC_unused_contig_list[[wantedtaxon]])
+                        write_contigs_to_system(opt = opt, contig_names = curr_contigs_names, filename = file.path(curr_bin_output_folder, curr_fn))
+                    }
+
+                    #Create a folder for checkM output and run checkm2
+                    curr_checkM_output_folder <- file.path(curr_bin_output_folder, "CheckM_out")
+                    #ensure there is no standing checkM output folder
+                    unlink(curr_checkM_output_folder, recursive = TRUE)
+                    dir.create(curr_checkM_output_folder, showWarnings = FALSE, recursive = TRUE)
+                    binfp <- file.path(curr_bin_output_folder, "*.fasta")
+                    chechmArgs <- c("predict", "--threads", opt$threads, "--input", binfp, "--output-directory", curr_checkM_output_folder)
+                    system2('checkm2', args = chechmArgs, stdout = FALSE, stderr = FALSE)
+
+                    checkm_out <- fread(file = file.path(curr_checkM_output_folder, "quality_report.tsv"), data.table = FALSE)
+                    colnames(checkm_out)[which(colnames(checkm_out) == "Name")] <- "ConsolidatedGenomeBin"
+                    checkm_out$Additional_Notes <- NULL
+                    rownames(checkm_out) <- checkm_out[ , "ConsolidatedGenomeBin"]
+                    #keep only > HQ or MHQ bins
+                    checkm_out <- rate_bin_quality(completeness_df = checkm_out)
+                    checkm_out <- subset(checkm_out, Quality %in% c("HQ", "MHQ"))
+                    #Clean up
+                    unlink(curr_bin_output_folder, recursive = TRUE)
+                    #Transfer used supplemental contigs to opt$contigsdata as consolidated and update MB2 info 
+                    if (nrow(checkm_out) > 0){
+                        flog.info(paste("A total of", nrow(checkm_out), "MetaBat2 bins had their qualities enhanced with kraken2-identified unbinned contigs."))
+                        for (MB2fix in rownames(checkm_out)){
+                            #Update contigsdata
+                            opt$contigsdata[MTC_unused_contig_list[[MB2fix]], "ConsolidatedGenomeBin"] <- MB2fix
+                            opt$contigsdata[MTC_unused_contig_list[[MB2fix]], "Consolidation_from"] <- "Kraken2CheckM2"
+                            #remove from contigsdata_unused
+                            opt$contigsdata_unused <- opt$contigsdata_unused[rownames(opt$contigsdata_unused)[!(rownames(opt$contigsdata_unused) %in% MTC_unused_contig_list[[MB2fix]])], ]
+                            #Update consolidated_entities
+                            for (ctu in intersect(colnames(consolidated_entities), colnames(checkm_out))){
+                                consolidated_entities[MB2fix, ctu] <- checkm_out[MB2fix, ctu]
+                            }
+                        }
+                    }
+                    checkm_out <- NULL
+                }
+            }
+
+            #Add PPM and NumBases of consolidated MB2 bins
+            curr_agg_df <- as.data.frame(opt$contigsdata[which(opt$contigsdata$ConsolidatedGenomeBin %in% rownames(consolidated_entities)), c("Contig", "ConsolidatedGenomeBin", "NumBases")] %>% group_by(ConsolidatedGenomeBin) %>% summarise(NumBases = sum(NumBases)))
+            rownames(curr_agg_df) <- curr_agg_df$ConsolidatedGenomeBin
+            curr_agg_df$PPM <- round((curr_agg_df$NumBases / sum(opt$contigsdata$NumBases)) * 1E6, 0)
+            consolidated_entities$NumBases <- curr_agg_df[rownames(consolidated_entities), "NumBases"]
+            consolidated_entities$PPM <- curr_agg_df[rownames(consolidated_entities), "PPM"]
+            curr_agg_df <- NULL
 
         } else {
             flog.info(paste("No HQ or MHQ level MetaBAT2 bins found."))
@@ -82,17 +176,24 @@ consolidate_entities_in_sample <- function(opt = opt){
         flog.info(paste0("At this point, ", curr_relabund_consolidated, "% of contig sequencing depth has been consolidated."))
     }
 
-    for (curr_quality_level in Quality_levels_pecking_order){
+    #Re-evaluate completenessess with all the leftover contigs
+    if (nrow(opt$contigsdata_unused) > 0){
+        opt <- evaluate_LKTs(opt = opt, taxlvls = "LKT", contigsdata_name = "contigsdata_unused", output_list_name = "contigs_from_unfit_bins")
+    }
 
+    consolidated_LKTs <- NULL
+    for (curr_quality_level in Quality_levels_pecking_order){
         if (nrow(opt$contigsdata_unused) > 0){
             #Continue with consolidation via classical approach.
             curr_taxonomic_completeness_df_name <- "contigs_from_unfit_bins"
-            opt <- evaluate_LKTs(opt = opt, taxlvls = "LKT", contigsdata_name = "contigsdata_unused", output_list_name = curr_taxonomic_completeness_df_name)
+            curr_taxonomic_completeness_df <- opt[[curr_taxonomic_completeness_df_name]][["LKT"]]
+            ## AVOID double jeapordy by eliminating consolidated LKTs from previous rounds.
+            curr_taxonomic_completeness_df <- curr_taxonomic_completeness_df[which(!(curr_taxonomic_completeness_df$LKT %in% consolidated_LKTs)), ]
 
             flog.info("Estimating genome completeness at higher taxonomic levels for reassigning LKTs. Completeness will subsequently be verified with CheckM2.")
 
             relevanttaxlvls <- c("IS1", "Species", "Genus", "Family", "Order", "Class", "Phylum", "Kingdom")
-            agg_completeness_list <- lapply(relevanttaxlvls, function (x) { glom_completeness(completeness_df = subset(opt[[curr_taxonomic_completeness_df_name]][["LKT"]], LKT != "LKT__Unclassified"), taxlvl = x, High_contamination_threshold = 20) } )
+            agg_completeness_list <- lapply(relevanttaxlvls, function (x) { glom_completeness(completeness_df = subset(curr_taxonomic_completeness_df, LKT != "LKT__Unclassified"), taxlvl = x, High_contamination_threshold = 20) } )
             names(agg_completeness_list) <- relevanttaxlvls
 
             #Now apply an algorithm of finding best bins at quality level, from LKT to Phylum
@@ -102,7 +203,7 @@ consolidate_entities_in_sample <- function(opt = opt){
                 colnames(agg_completeness_list[[taxlvl]])[colnames(agg_completeness_list[[taxlvl]]) %in% colstotag] <- paste(taxlvl, colnames(agg_completeness_list[[taxlvl]])[colnames(agg_completeness_list[[taxlvl]]) %in% colstotag], sep = "_")
             }
             #Add completeness info at all levels to the master LKT table.
-            LKT_est_completeness_df <- opt[[curr_taxonomic_completeness_df_name]][["LKT"]]
+            LKT_est_completeness_df <- curr_taxonomic_completeness_df
             for (taxlvl in relevanttaxlvls){
                 LKT_est_completeness_df <- left_join(LKT_est_completeness_df, agg_completeness_list[[taxlvl]], by = taxlvl)
             }
@@ -146,167 +247,199 @@ consolidate_entities_in_sample <- function(opt = opt){
             curr_acceptable_qual_levels <- Quality_levels_pecking_order[1:which(Quality_levels_pecking_order == curr_quality_level)]
             LKT_est_completeness_df <- LKT_est_completeness_df[which(LKT_est_completeness_df$Best_consolidation_quality_at_taxonomic_level %in% curr_acceptable_qual_levels), ]
 
-            #Annotate contigs which survive
-            for (curr_agg_tax_lvl in unique(LKT_est_completeness_df$Taxonomic_level_to_consolidate)){
-                tmp_df <- subset(LKT_est_completeness_df, Taxonomic_level_to_consolidate == curr_agg_tax_lvl)[ c("LKT", curr_agg_tax_lvl, paste(curr_agg_tax_lvl, c("Completeness", "Contamination", "Quality"), sep = "_"), "PPM")]
-                #Pick out the contigs from each unique taxon at that taxlvl
-                for (txn in unique(tmp_df[ , curr_agg_tax_lvl])){
-                    curr_LKTs_to_mark <- tmp_df[which(tmp_df[ , curr_agg_tax_lvl] == txn), "LKT"]
-                    curr_contigs_to_mark <- opt$contigsdata_unused[which(opt$contigsdata_unused$LKT %in% curr_LKTs_to_mark), "Contig"]
-                    #Mark these contigs and check if the quality is really adequate with actual Check_M
-                    opt$contigsdata_unused[curr_contigs_to_mark, "Consolidation_from"] <- paste("ContigCompleteness", curr_quality_level, sep = "_")
-                    opt$contigsdata_unused[curr_contigs_to_mark, "ConsolidatedGenomeBin"] <- paste("cLKT", gsub("^LKT__", "", txn), sep = "__")
-                    curr_LKTs_to_mark <- NULL
-                    curr_contigs_to_mark <- NULL
-                }
-            }
+            if (nrow(LKT_est_completeness_df) > 0){
+                #Annotate contigs which survive
+                for (curr_agg_tax_lvl in unique(LKT_est_completeness_df$Taxonomic_level_to_consolidate)){
+                    tmp_df <- subset(LKT_est_completeness_df, Taxonomic_level_to_consolidate == curr_agg_tax_lvl)[ c("LKT", curr_agg_tax_lvl, paste(curr_agg_tax_lvl, c("Completeness", "Contamination", "Quality"), sep = "_"), "PPM")]
 
-            #Not possible to use the evaluate_LKTs function so recycle the code
-            bins_to_eval <- unique(opt$contigsdata_unused$ConsolidatedGenomeBin)[!is.na(unique(opt$contigsdata_unused$ConsolidatedGenomeBin))]
-            bins_to_eval_df <- data.frame(ConsolidatedGenomeBin = bins_to_eval)
-            bins_to_eval_df$Taxid <- sapply(bins_to_eval_df$ConsolidatedGenomeBin, function (x) { unlist(strsplit(x, split = "_"))[5] } )
-            bins_to_eval_df <- left_join(bins_to_eval_df, JAMStaxtable, by = "Taxid")
+                    #Do not mark for concolidation any dark matter which looks complete.
+                    curr_taxa_to_mark <- unique(tmp_df[ , curr_agg_tax_lvl])
+                    curr_taxa_to_mark <- curr_taxa_to_mark[!(curr_taxa_to_mark %in% c("d__Unclassified", "k__Unclassified", "p__Unclassified", "c__Unclassified", "o__Unclassified", "f__Unclassified", "g__Unclassified", "s__Unclassified", "is1__Unclassified"))]
 
-            #Eliminate bins without taxids (Missing, Unclassified and NA)
-            bins_to_eval_df <- bins_to_eval_df[sapply(bins_to_eval_df$Taxid, function (x) { can_be_made_numeric(x) }), ]
-
-            curr_contigsdata <- opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% bins_to_eval_df$ConsolidatedGenomeBin), c("Contig", "ConsolidatedGenomeBin", "Length", "NumBases")]
-            curr_contigsdata <- left_join(curr_contigsdata, bins_to_eval_df, by = "ConsolidatedGenomeBin")
-            taxonomic_completeness_and_counts <- list()
-            domains_checkm_will_work_on <- c("d__2157_Archaea", "d__Archaea", "d__2_Bacteria", "d__Bacteria")
-            bacterial_contigsdata <- subset(curr_contigsdata, Domain %in% domains_checkm_will_work_on)
-            nonbacterial_contigsdata <- subset(curr_contigsdata, !(Domain %in% domains_checkm_will_work_on))
-
-            taxonomic_completeness <- NULL
-            if (nrow(bacterial_contigsdata) > 0) {
-                wantedtaxa <- unique(bacterial_contigsdata[ , "ConsolidatedGenomeBin"])[!(unique(bacterial_contigsdata[ , "ConsolidatedGenomeBin"]) %in% c("none", NA))]
-                #Eliminate "s__Unclassified" at Species taxlvl, because at the Species level, completeness of "s__Unclassified" makes no sense because it may belong to several different genera, etc.
-                wantedtaxa <- wantedtaxa[!(wantedtaxa %in% c("cLKT__d__Unclassified", "cLKT__k__Unclassified", "cLKT__p__Unclassified", "cLKT__c__Unclassified", "cLKT__o__Unclassified", "cLKT__f__Unclassified", "cLKT__g__Unclassified", "cLKT__s__Unclassified", "cLKT__is1__Unclassified", "cLKT__Unclassified"))]
-
-                flog.info(paste("There are", length(wantedtaxa), "bacterial or archaeal taxa to verify if quality is", curr_quality_level, "or above."))
-                #Write contigs to temporary bins for completeness evaluation
-                curr_bin_output_folder <- file.path(opt$sampledir, "temp_bins")
-                unlink(curr_bin_output_folder, recursive = TRUE)
-                dir.create(curr_bin_output_folder, showWarnings = TRUE, recursive = TRUE)
-                for (wantedtaxon in wantedtaxa){
-                    curr_fn <- paste(wantedtaxon, "fasta", sep = ".")
-                    curr_contigs_names <- bacterial_contigsdata[which(bacterial_contigsdata[ , "ConsolidatedGenomeBin"] == wantedtaxon), "Contig"]
-                    write_contigs_to_system(opt = opt, contig_names = curr_contigs_names, filename = file.path(curr_bin_output_folder, curr_fn))
-                }
-
-                #Create a folder for checkM output and run checkm2
-                curr_checkM_output_folder <- file.path(curr_bin_output_folder, "CheckM_out")
-                #ensure there is no standing checkM output folder
-                unlink(curr_checkM_output_folder, recursive = TRUE)
-                dir.create(curr_checkM_output_folder, showWarnings = FALSE, recursive = TRUE)
-                binfp <- file.path(curr_bin_output_folder, "*.fasta")
-                chechmArgs <- c("predict", "--threads", opt$threads, "--input", binfp, "--output-directory", curr_checkM_output_folder)
-                flog.info(paste("Evaluating quality of bacterial and archaeal taxa with CheckM2"))
-                system2('checkm2', args = chechmArgs, stdout = FALSE, stderr = FALSE)
-
-                checkm_out <- fread(file = file.path(curr_checkM_output_folder, "quality_report.tsv"), data.table = FALSE)
-                colnames(checkm_out)[which(colnames(checkm_out) == "Name")] <- "ConsolidatedGenomeBin"
-                checkm_out$Additional_Notes <- NULL
-                rownames(checkm_out) <- checkm_out[ , "ConsolidatedGenomeBin"]
-
-                #Some checkm outputs may have failed from the contigs being too small or not having ORFs. If there are any, fall back on estimated genome completeness.
-                if (nrow(checkm_out) < length(wantedtaxa)){
-                    #Find out missing wantedtaxa
-                    missingtaxa <- wantedtaxa[!(wantedtaxa %in% checkm_out[ , "ConsolidatedGenomeBin"])]
-                    suppl_info <- as.data.frame(bacterial_contigsdata[which(bacterial_contigsdata[ , "ConsolidatedGenomeBin"] %in%  missingtaxa), ] %>% group_by_at("ConsolidatedGenomeBin") %>% summarise(Genome_Size = sum(Length), Total_Contigs = length(Length), Max_Contig_Length = max(Length)))
-                    rownames(suppl_info) <- suppl_info[ , "ConsolidatedGenomeBin"]
-                    suppl_df <- as.data.frame(matrix(data = NA, nrow = length(missingtaxa), ncol = ncol(checkm_out)))
-                    colnames(suppl_df) <- colnames(checkm_out)
-                    suppl_df[ , "ConsolidatedGenomeBin"] <- missingtaxa
-                    rownames(suppl_df) <- suppl_df[ , "ConsolidatedGenomeBin"]
-                    for (colm in c("Genome_Size", "Total_Contigs", "Max_Contig_Length")){
-                        suppl_df[ , colm] <- suppl_info[rownames(suppl_df), colm]
+                    if (length(curr_taxa_to_mark) > 0){
+                        #Pick out the contigs from each unique taxon at that taxlvl
+                        for (txn in unique(tmp_df[ , curr_agg_tax_lvl])){
+                            curr_LKTs_to_mark <- tmp_df[which(tmp_df[ , curr_agg_tax_lvl] == txn), "LKT"]
+                            curr_contigs_to_mark <- opt$contigsdata_unused[which(opt$contigsdata_unused$LKT %in% curr_LKTs_to_mark), "Contig"]
+                            #Mark these contigs and check if the quality is really adequate with actual Check_M
+                            opt$contigsdata_unused[curr_contigs_to_mark, "Consolidation_from"] <- paste("ContigCompleteness", curr_quality_level, sep = "_")
+                            opt$contigsdata_unused[curr_contigs_to_mark, "ConsolidatedGenomeBin"] <- paste("cLKT", gsub("^LKT__", "", txn), sep = "__")
+                            curr_LKTs_to_mark <- NULL
+                            curr_contigs_to_mark <- NULL
+                        }
                     }
-                    suppl_df$Completeness_Model_Used <- "Percent contig sum over expected genome size"
-                    checkm_out <- rbind(checkm_out, suppl_df)
-                }
-                taxonomic_completeness <- rbind(taxonomic_completeness, checkm_out)
-                #Clean up
-                unlink(curr_bin_output_folder, recursive = TRUE)
-            } #end conditional for there being bacterial contigs
-
-            if (nrow(nonbacterial_contigsdata) > 0){
-                wantedtaxa <- unique(nonbacterial_contigsdata[ , "ConsolidatedGenomeBin"])[!unique(nonbacterial_contigsdata[ , "ConsolidatedGenomeBin"]) %in% c(NA, "none")]
-                #Eliminate "s__Unclassified" at Species taxlvl, because at the Species level, completeness of "s__Unclassified" makes no sense because it may belong to several different genera, etc.
-                wantedtaxa <- wantedtaxa[!(wantedtaxa %in% c("cLKT__d__Unclassified", "cLKT__k__Unclassified", "cLKT__p__Unclassified", "cLKT__c__Unclassified", "cLKT__o__Unclassified", "cLKT__f__Unclassified", "cLKT__g__Unclassified", "cLKT__s__Unclassified", "cLKT__is1__Unclassified"))]
-                flog.info(paste("There are", length(wantedtaxa), "non-bacterial or non-archaeal taxa to verify if quality is", curr_quality_level, "or above."))
-                nonbacterial_taxonomic_completeness <- as.data.frame(matrix(data = NA, nrow = length(wantedtaxa), ncol = 13))
-                rownames(nonbacterial_taxonomic_completeness) <- wantedtaxa
-                colnames(nonbacterial_taxonomic_completeness) <- c("ConsolidatedGenomeBin", "Completeness", "Contamination", "Completeness_Model_Used", "Translation_Table_Used", "Coding_Density", "Contig_N50", "Average_Gene_Length", "Genome_Size", "GC_Content", "Total_Coding_Sequences", "Total_Contigs", "Max_Contig_Length")
-                nonbacterial_taxonomic_completeness[ , "ConsolidatedGenomeBin"] <- wantedtaxa
-                nonbacterial_taxonomic_completeness[ , "Completeness_Model_Used"] <- "Percent contig sum over expected genome size"
-                suppl_info <- as.data.frame(nonbacterial_contigsdata %>% group_by(ConsolidatedGenomeBin) %>% summarise(Genome_Size = sum(Length), Total_Contigs = length(Length), Max_Contig_Length = max(Length)))
-                rownames(suppl_info) <- suppl_info[ , "ConsolidatedGenomeBin"]
-                for (colm in c("Genome_Size", "Total_Contigs", "Max_Contig_Length")){
-                    nonbacterial_taxonomic_completeness[ , colm] <- suppl_info[rownames(nonbacterial_taxonomic_completeness), colm]
+                    curr_taxa_to_mark <- NULL
+                    tmp_df <- NULL
                 }
 
-                #Add temporary reference genome sizes for completeness evaluation
-                estimate_genome_completeness <- function(taxonomic_completeness = NULL, taxon = NULL){
-                    curr_ctg_length_sum <- taxonomic_completeness[taxon, "Genome_Size"]
-                    curr_exp_gen_size <- max(as.numeric(taxonomic_completeness[taxon, "Median_taxid_genome_size"])) #should be the same but just err on the safe side
-                    curr_pct_of_egs <- round(((curr_ctg_length_sum / curr_exp_gen_size) * 100), 2)
+                #If any bins are evaluable (i.e. not spurious or dark matter), then evaluate.
+                bins_to_eval <- unique(opt$contigsdata_unused$ConsolidatedGenomeBin)[!is.na(unique(opt$contigsdata_unused$ConsolidatedGenomeBin))]
+                if (length(bins_to_eval) > 0){
+                    bins_to_eval_df <- data.frame(ConsolidatedGenomeBin = bins_to_eval)
+                    bins_to_eval_df$Taxid <- sapply(bins_to_eval_df$ConsolidatedGenomeBin, function (x) { unlist(strsplit(x, split = "_"))[5] } )
+                    bins_to_eval_df <- left_join(bins_to_eval_df, JAMStaxtable, by = "Taxid")
 
-                    return(curr_pct_of_egs)
-                }
+                    #Eliminate bins without taxids (Missing, Unclassified and NA)
+                    bins_to_eval_df <- bins_to_eval_df[sapply(bins_to_eval_df$Taxid, function (x) { can_be_made_numeric(x) }), ]
 
-                nonbacterial_taxonomic_completeness <- left_join(nonbacterial_taxonomic_completeness, bins_to_eval_df[ , c("ConsolidatedGenomeBin", "Median_taxid_genome_size")], by = "ConsolidatedGenomeBin") 
-                rownames(nonbacterial_taxonomic_completeness) <- nonbacterial_taxonomic_completeness$ConsolidatedGenomeBin
+                    curr_contigsdata <- opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% bins_to_eval_df$ConsolidatedGenomeBin), c("Contig", "ConsolidatedGenomeBin", "Length", "NumBases")]
+                    curr_contigsdata <- left_join(curr_contigsdata, bins_to_eval_df, by = "ConsolidatedGenomeBin")
+                    taxonomic_completeness_and_counts <- list()
+                    domains_checkm_will_work_on <- c("d__2157_Archaea", "d__Archaea", "d__2_Bacteria", "d__Bacteria")
+                    bacterial_contigsdata <- subset(curr_contigsdata, Domain %in% domains_checkm_will_work_on)
+                    nonbacterial_contigsdata <- subset(curr_contigsdata, !(Domain %in% domains_checkm_will_work_on))
 
-                nonbacterial_taxonomic_completeness[ , "Completeness"] <- sapply(nonbacterial_taxonomic_completeness[ , "ConsolidatedGenomeBin"], function(x) {estimate_genome_completeness(taxonomic_completeness = nonbacterial_taxonomic_completeness, taxon = x)} )
-                #Change format to checkM format of completeness capped to 100
-                nonbacterial_taxonomic_completeness <- reformat_completeness_to_CheckM_style(completeness_df = nonbacterial_taxonomic_completeness)
-                nonbacterial_taxonomic_completeness$Median_taxid_genome_size <- NULL
+                    taxonomic_completeness <- NULL
+                    if (nrow(bacterial_contigsdata) > 0) {
+                        wantedtaxa <- unique(bacterial_contigsdata[ , "ConsolidatedGenomeBin"])[!(unique(bacterial_contigsdata[ , "ConsolidatedGenomeBin"]) %in% c("none", NA))]
+                        #Eliminate "s__Unclassified" at Species taxlvl, because at the Species level, completeness of "s__Unclassified" makes no sense because it may belong to several different genera, etc.
+                        wantedtaxa <- wantedtaxa[!(wantedtaxa %in% c("cLKT__d__Unclassified", "cLKT__k__Unclassified", "cLKT__p__Unclassified", "cLKT__c__Unclassified", "cLKT__o__Unclassified", "cLKT__f__Unclassified", "cLKT__g__Unclassified", "cLKT__s__Unclassified", "cLKT__is1__Unclassified", "cLKT__Unclassified"))]
 
-                taxonomic_completeness <- rbind(taxonomic_completeness, nonbacterial_taxonomic_completeness)
-            } #end conditional for there being non-bacterial contigs
+                        flog.info(paste("There are", length(wantedtaxa), "bacterial or archaeal taxa to verify if quality is", curr_quality_level, "or above."))
+                        #Write contigs to temporary bins for completeness evaluation
+                        curr_bin_output_folder <- file.path(opt$sampledir, "temp_bins")
+                        unlink(curr_bin_output_folder, recursive = TRUE)
+                        dir.create(curr_bin_output_folder, showWarnings = TRUE, recursive = TRUE)
+                        for (wantedtaxon in wantedtaxa){
+                            curr_fn <- paste(wantedtaxon, "fasta", sep = ".")
+                            curr_contigs_names <- bacterial_contigsdata[which(bacterial_contigsdata[ , "ConsolidatedGenomeBin"] == wantedtaxon), "Contig"]
+                            #test if length > 5000, else, don't bother to write to system, because CheckM will fail.
+                            if (sum(opt$contigsdata[curr_contigs_names, "Length"]) >= 5000){
+                                write_contigs_to_system(opt = opt, contig_names = curr_contigs_names, filename = file.path(curr_bin_output_folder, curr_fn))
+                            }
+                        }
+                        #Check first if there are any fasta files written
+                        if (length(list.files(path = curr_bin_output_folder, pattern = "*.fasta")) > 0){
+                            #Create a folder for checkM output and run checkm2
+                            curr_checkM_output_folder <- file.path(curr_bin_output_folder, "CheckM_out")
+                            #ensure there is no standing checkM output folder
+                            unlink(curr_checkM_output_folder, recursive = TRUE)
+                            dir.create(curr_checkM_output_folder, showWarnings = FALSE, recursive = TRUE)
+                            binfp <- file.path(curr_bin_output_folder, "*.fasta")
+                            chechmArgs <- c("predict", "--threads", opt$threads, "--input", binfp, "--output-directory", curr_checkM_output_folder)
+                            flog.info(paste("Evaluating quality of bacterial and archaeal taxa with CheckM2"))
+                            system2('checkm2', args = chechmArgs, stdout = FALSE, stderr = FALSE)
 
-            taxonomic_completeness <- rate_bin_quality(completeness_df = taxonomic_completeness)
+                            checkm_out <- fread(file = file.path(curr_checkM_output_folder, "quality_report.tsv"), data.table = FALSE)
+                            colnames(checkm_out)[which(colnames(checkm_out) == "Name")] <- "ConsolidatedGenomeBin"
+                            checkm_out$Additional_Notes <- NULL
+                            rownames(checkm_out) <- checkm_out[ , "ConsolidatedGenomeBin"]
 
-            #Consolidate only the bins which are at the current desired level.
+                            #Some checkm outputs may have failed from the contigs being too small or not having ORFs. If there are any, fall back on estimated genome completeness.
+                            if (nrow(checkm_out) < length(wantedtaxa)){
+                                #Find out missing wantedtaxa
+                                missingtaxa <- wantedtaxa[!(wantedtaxa %in% checkm_out[ , "ConsolidatedGenomeBin"])]
+                                suppl_info <- as.data.frame(bacterial_contigsdata[which(bacterial_contigsdata[ , "ConsolidatedGenomeBin"] %in%  missingtaxa), ] %>% group_by_at("ConsolidatedGenomeBin") %>% summarise(Genome_Size = sum(Length), Total_Contigs = length(Length), Max_Contig_Length = max(Length)))
+                                rownames(suppl_info) <- suppl_info[ , "ConsolidatedGenomeBin"]
+                                suppl_df <- as.data.frame(matrix(data = NA, nrow = length(missingtaxa), ncol = ncol(checkm_out)))
+                                colnames(suppl_df) <- colnames(checkm_out)
+                                suppl_df[ , "ConsolidatedGenomeBin"] <- missingtaxa
+                                rownames(suppl_df) <- suppl_df[ , "ConsolidatedGenomeBin"]
+                                for (colm in c("Genome_Size", "Total_Contigs", "Max_Contig_Length")){
+                                    suppl_df[ , colm] <- suppl_info[rownames(suppl_df), colm]
+                                }
+                                suppl_df$Completeness_Model_Used <- "Percent contig sum over expected genome size"
+                                checkm_out <- rbind(checkm_out, suppl_df)
+                            }
+                            taxonomic_completeness <- rbind(taxonomic_completeness, checkm_out)
+                            #Clean up
+                            unlink(curr_bin_output_folder, recursive = TRUE)
+                        } #end conditional that there were contigs written
+                    }  #end conditional for there being bacterial contigs
 
-            #Bank these to consolidated_entities
-            curr_consolidated_entities <- taxonomic_completeness[which(taxonomic_completeness$Quality %in% curr_acceptable_qual_levels), ]
-            curr_consolidated_entities <- left_join(curr_consolidated_entities, bins_to_eval_df, by = "ConsolidatedGenomeBin")
+                    if (nrow(nonbacterial_contigsdata) > 0){
+                        wantedtaxa <- unique(nonbacterial_contigsdata[ , "ConsolidatedGenomeBin"])[!unique(nonbacterial_contigsdata[ , "ConsolidatedGenomeBin"]) %in% c(NA, "none")]
+                        #Eliminate "s__Unclassified" at Species taxlvl, because at the Species level, completeness of "s__Unclassified" makes no sense because it may belong to several different genera, etc.
+                        wantedtaxa <- wantedtaxa[!(wantedtaxa %in% c("cLKT__d__Unclassified", "cLKT__k__Unclassified", "cLKT__p__Unclassified", "cLKT__c__Unclassified", "cLKT__o__Unclassified", "cLKT__f__Unclassified", "cLKT__g__Unclassified", "cLKT__s__Unclassified", "cLKT__is1__Unclassified"))]
+                        flog.info(paste("There are", length(wantedtaxa), "non-bacterial or non-archaeal taxa to verify if quality is", curr_quality_level, "or above."))
+                        nonbacterial_taxonomic_completeness <- as.data.frame(matrix(data = NA, nrow = length(wantedtaxa), ncol = 13))
+                        rownames(nonbacterial_taxonomic_completeness) <- wantedtaxa
+                        colnames(nonbacterial_taxonomic_completeness) <- c("ConsolidatedGenomeBin", "Completeness", "Contamination", "Completeness_Model_Used", "Translation_Table_Used", "Coding_Density", "Contig_N50", "Average_Gene_Length", "Genome_Size", "GC_Content", "Total_Coding_Sequences", "Total_Contigs", "Max_Contig_Length")
+                        nonbacterial_taxonomic_completeness[ , "ConsolidatedGenomeBin"] <- wantedtaxa
+                        nonbacterial_taxonomic_completeness[ , "Completeness_Model_Used"] <- "Percent contig sum over expected genome size"
+                        suppl_info <- as.data.frame(nonbacterial_contigsdata %>% group_by(ConsolidatedGenomeBin) %>% summarise(Genome_Size = sum(Length), Total_Contigs = length(Length), Max_Contig_Length = max(Length)))
+                        rownames(suppl_info) <- suppl_info[ , "ConsolidatedGenomeBin"]
+                        for (colm in c("Genome_Size", "Total_Contigs", "Max_Contig_Length")){
+                            nonbacterial_taxonomic_completeness[ , colm] <- suppl_info[rownames(nonbacterial_taxonomic_completeness), colm]
+                        }
 
-            #Censor bins below acceptable quality in opt$contigsdata_unused and consolidate OK bins to opt$contigsdata
-            bins2censor <- taxonomic_completeness[which(!(taxonomic_completeness$Quality %in% curr_acceptable_qual_levels)), "ConsolidatedGenomeBin"]
-            #Reset back to NA
-            opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% bins2censor), "ConsolidatedGenomeBin"] <- NA
-            opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% bins2censor), "Consolidation_from"] <- NA
+                        #Add temporary reference genome sizes for completeness evaluation
+                        nonbacterial_taxonomic_completeness <- left_join(nonbacterial_taxonomic_completeness, bins_to_eval_df[ , c("ConsolidatedGenomeBin", "Median_taxid_genome_size")], by = "ConsolidatedGenomeBin") 
+                        rownames(nonbacterial_taxonomic_completeness) <- nonbacterial_taxonomic_completeness$ConsolidatedGenomeBin
 
-            #Add PPM and RefScore
-            curr_contigs_to_consolidate <- opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% curr_consolidated_entities$ConsolidatedGenomeBin), "Contig"]
+                        nonbacterial_taxonomic_completeness[ , "Completeness"] <- sapply(nonbacterial_taxonomic_completeness[ , "ConsolidatedGenomeBin"], function(x) {estimate_genome_completeness(taxonomic_completeness = nonbacterial_taxonomic_completeness, taxon = x)} )
+                        #Change format to checkM format of completeness capped to 100
+                        nonbacterial_taxonomic_completeness <- reformat_completeness_to_CheckM_style(completeness_df = nonbacterial_taxonomic_completeness)
+                        nonbacterial_taxonomic_completeness$Median_taxid_genome_size <- NULL
 
-            curr_agg_df <- as.data.frame(opt$contigsdata_unused[curr_contigs_to_consolidate, c("Contig", "ConsolidatedGenomeBin", "NumBases")] %>% group_by(ConsolidatedGenomeBin) %>% summarise(NumBases = sum(NumBases)))
-            curr_agg_df$PPM <- round((curr_agg_df$NumBases / sum(opt$contigsdata$NumBases)) * 1E6, 0)
+                        taxonomic_completeness <- rbind(taxonomic_completeness, nonbacterial_taxonomic_completeness)
+                    } #end conditional for there being non-bacterial contigs
 
-            curr_consolidated_entities <- left_join(curr_consolidated_entities, curr_agg_df, by = "ConsolidatedGenomeBin")
-            curr_agg_df <- NULL #Neurotic me
-            curr_consolidated_entities$RefScore <- (as.numeric(curr_consolidated_entities$Num_isolate) * 5) + as.numeric(curr_consolidated_entities$Num_MAGs)
-            rownames(curr_consolidated_entities) <- curr_consolidated_entities[ , "ConsolidatedGenomeBin"]
+                    #There may have been no entities evaluated (Taxid Missing, Unclassified, etc.)
+                    if (!(is.null(taxonomic_completeness) || (nrow(taxonomic_completeness) == 0))){
+                        taxonomic_completeness <- rate_bin_quality(completeness_df = taxonomic_completeness)
 
-            curr_consolidated_entities <- curr_consolidated_entities[ , Final_report_cols]
+                        #Consolidate only the bins which are at the current desired level.
 
-            #Bank to consolidated_entities
-            consolidated_entities <- rbind(consolidated_entities, curr_consolidated_entities)
+                        #Bank these to consolidated_entities
+                        curr_consolidated_entities <- taxonomic_completeness[which(taxonomic_completeness$Quality %in% curr_acceptable_qual_levels), ]
+                        curr_consolidated_entities <- left_join(curr_consolidated_entities, bins_to_eval_df, by = "ConsolidatedGenomeBin")
 
-            #Annotate opt$contigsdata
-            curr_contigs_to_consolidate <- NULL
-            for (csb in unique(curr_consolidated_entities$ConsolidatedGenomeBin)){
-                curr_contigs_to_consolidate <- opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin == csb), "Contig"]
-                opt$contigsdata[curr_contigs_to_consolidate, "ConsolidatedGenomeBin"] <- csb
-                opt$contigsdata[curr_contigs_to_consolidate, "Consolidation_from"] <- "Kraken2CheckM2"
-            }
-            curr_contigs_to_consolidate <- NULL
+                        #Censor bins below acceptable quality in opt$contigsdata_unused and consolidate OK bins to opt$contigsdata
+                        bins2censor <- taxonomic_completeness[which(!(taxonomic_completeness$Quality %in% curr_acceptable_qual_levels)), "ConsolidatedGenomeBin"]
+                        #Reset back to NA
+                        opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% bins2censor), "ConsolidatedGenomeBin"] <- NA
+                        opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% bins2censor), "Consolidation_from"] <- NA
 
-            #Remove consolidated contigs from opt$contigsdata_unused
-            opt$contigsdata_unused <- opt$contigsdata_unused[which(is.na(opt$contigsdata_unused$ConsolidatedGenomeBin)), ]
+                        #Add PPM and RefScore
+                        curr_contigs_to_consolidate <- opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin %in% curr_consolidated_entities$ConsolidatedGenomeBin), "Contig"]
+
+                        curr_agg_df <- as.data.frame(opt$contigsdata_unused[curr_contigs_to_consolidate, c("Contig", "ConsolidatedGenomeBin", "NumBases")] %>% group_by(ConsolidatedGenomeBin) %>% summarise(NumBases = sum(NumBases)))
+                        curr_agg_df$PPM <- round((curr_agg_df$NumBases / sum(opt$contigsdata$NumBases)) * 1E6, 0)
+
+                        curr_consolidated_entities <- left_join(curr_consolidated_entities, curr_agg_df, by = "ConsolidatedGenomeBin")
+                        curr_agg_df <- NULL #Neurotic me
+                        curr_consolidated_entities$RefScore <- (as.numeric(curr_consolidated_entities$Num_isolate) * 5) + as.numeric(curr_consolidated_entities$Num_MAGs)
+                        rownames(curr_consolidated_entities) <- curr_consolidated_entities[ , "ConsolidatedGenomeBin"]
+
+                        curr_consolidated_entities <- curr_consolidated_entities[ , Final_report_cols]
+
+                        #Bank to consolidated_entities
+                        consolidated_entities <- rbind(consolidated_entities, curr_consolidated_entities)
+
+                        #Bank these consolidated ("used") LKTs to consolidated_LKTs for avoiding double jeopardy
+                        if (length(curr_contigs_to_consolidate) > 0){
+                            consolidated_LKTs <- c(consolidated_LKTs, unique(opt$contigsdata_unused[curr_contigs_to_consolidate, "LKT"]))
+                        }
+
+                        #Annotate opt$contigsdata
+                        if (length(unique(curr_consolidated_entities$ConsolidatedGenomeBin)) > 0){
+                            curr_contigs_to_consolidate <- NULL
+                            for (csb in unique(curr_consolidated_entities$ConsolidatedGenomeBin)){
+                                curr_contigs_to_consolidate <- opt$contigsdata_unused[which(opt$contigsdata_unused$ConsolidatedGenomeBin == csb), "Contig"]
+                                opt$contigsdata[curr_contigs_to_consolidate, "ConsolidatedGenomeBin"] <- csb
+                                opt$contigsdata[curr_contigs_to_consolidate, "Consolidation_from"] <- "Kraken2CheckM2"
+                            }
+                            curr_contigs_to_consolidate <- NULL
+                        }
+
+                        #Remove consolidated contigs from opt$contigsdata_unused
+                        opt$contigsdata_unused <- opt$contigsdata_unused[which(is.na(opt$contigsdata_unused$ConsolidatedGenomeBin)), ]
+                    } else {
+                        ##Reset back to NA
+                        opt$contigsdata_unused$ConsolidatedGenomeBin <- NA
+                        opt$contigsdata_unused$Consolidation_from <- NA
+                    }
+                } else {
+                    flog.info(paste("There are no taxa to verify if quality is", curr_quality_level, "or above."))
+                } #end conditional that there are any bins_to_eval
+
+            } else {
+
+                flog.info(paste("No higher level bins found at the", curr_quality_level, "quality level."))
+
+            }#end conditional that there were any aggregated LKTs at that particular quality cutoff
+
         }#end conditional for there being any unused contigs. They may have been used up in higher quality levels.
 
         #Report percentage contig depth was consolidated.
@@ -314,7 +447,7 @@ consolidate_entities_in_sample <- function(opt = opt){
         flog.info(paste0("At this point, ", curr_relabund_consolidated, "% of contig sequencing depth has been consolidated."))
 
     } #End loop for Quality levels
- 
+
     #Lastly, consolidate dark matter
     opt$leftover <- opt$contigsdata[which(is.na(opt$contigsdata$ConsolidatedGenomeBin)), , drop = FALSE]
     if (nrow(opt$leftover) > 0){
@@ -340,14 +473,15 @@ consolidate_entities_in_sample <- function(opt = opt){
         #Report percentage contig depth was consolidated.
         curr_relabund_consolidated <- round((sum(opt$contigsdata[!is.na(opt$contigsdata$ConsolidatedGenomeBin), "PPM"]) / sum(opt$contigsdata$PPM)) * 100, 2)
         flog.info(paste0("At this point, ", curr_relabund_consolidated, "% of contig sequencing depth has been consolidated."))
-    } 
-
+    } else {
+        #No leftover, bank to opt$abundances$taxonomic
+        opt$abundances$taxonomic$ConsolidatedGenomeBin <- consolidated_entities
+    }
     opt$abundances$taxonomic$ConsolidatedGenomeBin <- opt$abundances$taxonomic$ConsolidatedGenomeBin[ , Final_report_cols]
 
     #Add consolidation information to featuredata
     opt$featuredata <- left_join(opt$featuredata, opt$contigsdata[ , c("Contig", "ConsolidatedGenomeBin")], by = "Contig")
+    #opt$contigsdata$PPM <- NULL
 
     return(opt)
 }
-
-
