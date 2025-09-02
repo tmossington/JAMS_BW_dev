@@ -11,3 +11,4 @@ contextBridge.exposeInMainWorld('electron', {
   runRelabundFeaturesScript: (params) => ipcRenderer.invoke('run-relabundFeatures-script', params),
   onParamStr: (callback) => ipcRenderer.on('param-str', (event, paramStr) => callback(paramStr))
 });
+

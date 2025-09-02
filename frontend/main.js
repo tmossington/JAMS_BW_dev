@@ -3,6 +3,9 @@ const path = require('path');
 const { exec } = require('child_process');
 const fs = require('fs');
 
+// Import autoUpdater from electron-updater
+// const { autoUpdater } = require('electron-updater');
+
 let mainWindow;
 
 console.log(`app.isPackaged: ${app.isPackaged}`); // debugging
@@ -31,6 +34,9 @@ function createWindow() {
 
   // Check if JAMS is installed
   checkJAMSInstallation();
+
+  // Check for updates after creating the window
+  // autoUpdater.checkForUpdatesAndNotify();
 }
 
 app.on('ready', createWindow);
@@ -46,6 +52,25 @@ app.on('activate', () => {
     createWindow();
   }
 });
+
+// Listen for update events
+//autoUpdater.on('update-available', () => {
+ // dialog.showMessageBox({
+  //  type: 'info',
+  //  title: 'Update available',
+  //  message: 'A new version of the application is available. It will be downloaded now.',
+//  });
+// });
+
+//autoUpdater.on('update-downloaded', () => {
+//  dialog.showMessageBox({
+//    type: 'info',
+//    title: 'Update ready',
+//    message: 'A new version of the application has been downloaded. The application will now restart to apply the update.',
+ // }).then(() => {
+  //  autoUpdater.quitAndInstall();
+ // });
+//});
 
 function checkJAMSInstallation() {
   let allExecutablesExist = true;

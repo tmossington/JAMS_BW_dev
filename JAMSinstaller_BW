@@ -341,7 +341,7 @@ if(!(all((c("devtools", "stringr", "parallel", "BiocManager", "prettyunits") %in
     install.packages(c("devtools", "stringr", "parallel", "BiocManager", "prettyunits"), repos = repos, update = TRUE, lib = rlibs)
 }
 #Make sure we have the correct version of Bioconductor
-BiocManager::install(version = "3.19", ask = FALSE)
+BiocManager::install(version = "3.21", ask = FALSE)
 
 require("devtools")
 require("stringr")
